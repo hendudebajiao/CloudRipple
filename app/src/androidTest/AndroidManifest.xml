@@ -1,0 +1,11 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <application>
+        <provider android:name="com.bajiao.notificationisland.IslandTestSourceProvider"
+            android:authorities="com.bajiao.notificationisland.test.source" android:exported="false" />
+        <receiver android:name="com.bajiao.notificationisland.IslandTestSource" android:exported="true" />
+    </application>
+    <instrumentation
+        android:name="com.bajiao.notificationisland.IslandRegressionTest"
+        android:targetPackage="com.bajiao.notificationisland" />
+</manifest>

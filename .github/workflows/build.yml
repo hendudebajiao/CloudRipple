@@ -1,0 +1,35 @@
+name: Build Android
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK 37
+        run: sdkmanager 'platforms;android-37' 'build-tools;37.0.0'
+      - name: Build APKs and device test APK
+        run: bash gradlew :app:assembleDebug :app:assembleRelease :app:assembleDebugAndroidTest --no-daemon
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: yunyang-apks
+          path: |
+            app/build/outputs/apk/debug/*.apk
+            app/build/outputs/apk/release/*.apk
+            app/build/outputs/apk/androidTest/debug/*.apk
+          retention-days: 14

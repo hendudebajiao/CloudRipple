@@ -1,0 +1,6 @@
+<resources>
+    <string name="app_name">云漾</string>
+    <string name="xposed_description">ColorOS 17 原生流体云通知上岛</string>
+    <string name="channel_name">云漾通知</string>
+    <string name="channel_description">由通知上岛服务维护的 Live Update</string>
+</resources>
