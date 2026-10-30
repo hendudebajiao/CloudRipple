@@ -3,7 +3,7 @@
 <p align="center"><img src="app/src/main/res/drawable-nodpi/ic_cloud_art.png" width="112" alt="云漾图标" /></p>
 <p align="center">让重要消息，轻轻浮现</p>
 
-面向 **Android 17 / ColorOS 17** 的通知流体云工具与 LSPosed 模块。作者：[八角](https://github.com/hendudebajiao) · [酷安](https://www.coolapk.com/u/37544079)。当前版本 **1.8.1（15）**。
+面向 **Android 17 / ColorOS 17** 的通知流体云工具与 LSPosed 模块。作者：[八角](https://github.com/hendudebajiao) · [酷安](https://www.coolapk.com/u/37544079)。当前版本 **1.8.2（16）**。
 
 勾选来源应用后，云漾通过通知监听读取消息，再以自身身份发布 Live Update，由 ColorOS 原生流体云呈现。配置界面、通知监测和通知展示分工独立；Root 保活直接通过 APK 请求 KernelSU 授权，无须另刷辅助 ZIP。
 
@@ -16,7 +16,8 @@
 - 手动下岛、到期或打开来源后隐藏转发；同一通知后续更新保持隐藏，原通知移除后重新发布才可再次上岛。
 - 设置停留时长，默认 15 秒；0 为不限时，范围 0～86400 秒。同一通知更新不会刷新期限，手动修改时长会重置现有期限。
 - QQ / 微信左侧优先显示消息发送者，其他应用显示应用名。来源图标优先级为通知大图标 / 头像 → 通知小图标 → 应用图标。
-- 收起岛右侧正文超过四字可滚动，展开正文正常显示；可关闭滚动或展开面板中的手动下岛按钮。
+- 首页快捷操作可开关流体云推送，关闭时保留通知监测和 Root 保活。
+- 收起岛右侧正文超出五字宽可滚动，展开正文正常显示；可关闭滚动或展开面板中的手动下岛按钮。
 - 浅蓝色 miuix 风格卡片界面与支持点击、拖动的悬浮底栏，以原生 Java View 实现。
 - 首次进入尝试 Root 授权并保存尝试状态；已有授权启用状态的安装不重复初始化。设置页提供“启用 / 刷新 Root 保活”和“停止 Root 保活”，可手动重试授权或停止看护。
 
@@ -33,7 +34,7 @@
 
 ## 构建
 
-使用 **JDK 17、Android SDK Platform 37、Build Tools 37.0.0、Gradle Wrapper 9.4.1、AGP 9.2.1**。首次构建需要联网下载 SDK 和 Maven/Gradle 依赖。
+使用 **JDK 21、Android SDK Platform 37、Build Tools 37.0.0、Gradle Wrapper 9.4.1、AGP 9.2.1**。首次构建需要联网下载 SDK 和 Maven/Gradle 依赖。
 
 Android Studio 打开仓库根目录；也可以设置 `ANDROID_HOME` 指向 SDK 后执行：
 

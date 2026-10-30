@@ -50,10 +50,11 @@ final class IslandState {
             CharSequence textValue = extras == null ? null : extras.getCharSequence("android.text");
             CharSequence big = extras == null ? null : extras.getCharSequence(Notification.EXTRA_BIG_TEXT);
             title = nonEmpty(titleValue == null ? null : titleValue.toString(), sourceLabel);
-            leftLabel = contactLabel(sourcePackage, n, title, sourceLabel);
             text = nonEmpty(textValue == null ? null : textValue.toString(), big == null ? "" : big.toString());
-            // Keep full content: SystemUI scrolls the view, never re-posts text fragments.
-            shortText = text.isEmpty() ? title : text;
+            Conversation conversation = conversation(sourcePackage, n, title, text, sourceLabel);
+            leftLabel = conversation.name;
+            // Only the compact island splits a legacy sender prefix; expanded text is original.
+            shortText = conversation.body;
             postedAt = sbn.getPostTime();
             contentIntent = n.contentIntent;
             original = sbn;
@@ -87,8 +88,9 @@ final class IslandState {
                         if (icon.getType() == Icon.TYPE_RESOURCE) {
                             String resourcePackage = icon.getResPackage();
                             if (resourcePackage == null || resourcePackage.isEmpty()) resourcePackage = pkg;
-                            long version = appContext.getPackageManager().getPackageInfo(resourcePackage, 0).lastUpdateTime;
-                            cacheKey = resourcePackage + ":" + version + ":" + icon.getResId();
+                            // Process-local cache, just like application icons. Do not call
+                            // PackageManager before every cache hit on the relay main thread.
+                            cacheKey = resourcePackage + ":" + icon.getResId();
                             Bitmap cached = resourceIcons.get(cacheKey);
                             if (cached != null) return cached;
                         }
@@ -99,7 +101,7 @@ final class IslandState {
                         drawable.draw(new Canvas(bitmap));
                         if (cacheKey != null) resourceIcons.put(cacheKey, bitmap);
                         return bitmap;
-                    } catch (android.content.pm.PackageManager.NameNotFoundException | RuntimeException ignored) {}
+                    } catch (RuntimeException ignored) {}
                 }
             }
             return iconFor(pkg);
@@ -120,19 +122,54 @@ final class IslandState {
 
     private IslandState() {}
 
-    static String contactLabel(String pkg, Notification notification, String title, String appLabel) {
-        if (!"com.tencent.mobileqq".equals(pkg) && !"com.tencent.mm".equals(pkg)) return appLabel;
-        android.os.Parcelable[] messages = notification.extras == null ? null
-                : notification.extras.getParcelableArray(Notification.EXTRA_MESSAGES);
+    static final class Conversation {
+        final String name, body;
+        Conversation(String name, String body) { this.name = name; this.body = body; }
+    }
+
+    static String contactLabel(String pkg, Notification n, String title, String appLabel) {
+        CharSequence text = n.extras == null ? null : n.extras.getCharSequence(Notification.EXTRA_TEXT);
+        return conversation(pkg, n, title, text == null ? "" : text.toString(), appLabel).name;
+    }
+
+    static Conversation conversation(String pkg, Notification n, String title, String text, String appLabel) {
+        String fallbackName = title == null || title.trim().isEmpty() ? appLabel : title.trim();
+        String fallbackBody = text == null || text.trim().isEmpty() ? fallbackName : text;
+        if (!"com.tencent.mobileqq".equals(pkg) && !"com.tencent.mm".equals(pkg))
+            return new Conversation(appLabel, fallbackBody);
+        // MessagingStyle sender/body are authoritative; never split colons in its message.
+        android.os.Parcelable[] messages = n.extras == null ? null
+                : n.extras.getParcelableArray(Notification.EXTRA_MESSAGES);
         if (messages != null) {
             for (int i = messages.length - 1; i >= 0; i--) {
                 if (!(messages[i] instanceof android.os.Bundle message)) continue;
                 android.app.Person person = message.getParcelable("sender_person");
                 CharSequence sender = person == null ? message.getCharSequence("sender") : person.getName();
-                if (sender != null && !sender.toString().trim().isEmpty()) return sender.toString();
+                CharSequence body = message.getCharSequence("text");
+                if (sender != null && !sender.toString().trim().isEmpty())
+                    return new Conversation(sender.toString().trim(), body == null ? fallbackBody : body.toString());
             }
         }
-        return title == null || title.trim().isEmpty() ? appLabel : title;
+        // QQ/WeChat legacy group notifications: [2条]小明：正文 or 小明: 正文.
+        // Split the first delimiter only. URLs, times and non-chat applications stay intact.
+        String value = fallbackBody.trim().replaceFirst("^\\s*[\\[【]\\d+条[^\\]】]*[\\]】]\\s*", "");
+        int ascii = value.indexOf(':');
+        int wide = value.indexOf('：');
+        int colon = ascii < 0 ? wide : wide < 0 ? ascii : Math.min(ascii, wide);
+        if (colon > 0 && colon <= 40) {
+            String name = value.substring(0, colon).trim();
+            String body = value.substring(colon + 1).trim();
+            boolean protocol = name.equalsIgnoreCase("http") || name.equalsIgnoreCase("https")
+                    || name.equalsIgnoreCase("ftp") || name.equalsIgnoreCase("mailto") || body.startsWith("//");
+            boolean clock = name.matches("[0-9]{1,2}") && body.matches("[0-9]{2}.*");
+            boolean group = n.extras != null && n.extras.getBoolean(Notification.EXTRA_IS_GROUP_CONVERSATION, false);
+            // Legacy apps often omit group metadata; a different sender prefix is the fallback.
+            if (!name.isEmpty() && !body.isEmpty() && !protocol && !clock
+                    && (group || !name.equals(fallbackName))) return new Conversation(name, body);
+            if (name.equals(fallbackName) && !body.isEmpty() && !protocol && !clock)
+                return new Conversation(fallbackName, body);
+        }
+        return new Conversation(fallbackName, fallbackBody);
     }
 
     static synchronized void init(Context context) {

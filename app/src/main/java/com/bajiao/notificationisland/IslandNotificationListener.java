@@ -64,7 +64,10 @@ public final class IslandNotificationListener extends NotificationListenerServic
             IslandForegroundService.stopTest(this);
             IslandState.init(this);
             IslandState.upsert(sbn);
+            long prepared = android.os.SystemClock.elapsedRealtime();
             IslandForegroundService.render(this);
+            Log.i(TAG, "Relay timing sourceAgeMs=" + Math.max(0, System.currentTimeMillis() - sbn.getPostTime())
+                    + " prepareMs=" + (prepared - received));
             // UsageStats IPC is kept out of the incoming notification fast path.
             main.post(() -> {
                 IslandState.Item before = IslandState.current();
@@ -118,7 +121,8 @@ public final class IslandNotificationListener extends NotificationListenerServic
             IslandState.reconcile(keys, allowed);
             Arrays.sort(active, Comparator.comparingLong(StatusBarNotification::getPostTime));
             for (StatusBarNotification sbn : active) if (accepts(sbn, allowed)) { accepted++; IslandState.sync(sbn); }
-            IslandOpenedSources.suppressOpened(this);
+            // Reconciliation must publish a newly discovered source before slow
+            // UsageStats IPC, just like onNotificationPosted's fast path.
             if (firstSync || !same(before, IslandState.current()))
                 Log.i(TAG, "Active sync total=" + active.length + ", accepted=" + accepted);
             IslandState.Item after = IslandState.current();
@@ -129,6 +133,11 @@ public final class IslandNotificationListener extends NotificationListenerServic
                 IslandForegroundService.render(this);
             }
             firstSync = false;
+            main.post(() -> {
+                IslandState.Item current = IslandState.current();
+                IslandOpenedSources.suppressOpened(this);
+                if (current != IslandState.current()) IslandForegroundService.render(this);
+            });
         } catch (SecurityException e) {
             // A stale system token is not a healthy connection. Stop snapshot polling
             // and request a rebind only if access is still granted by the user.

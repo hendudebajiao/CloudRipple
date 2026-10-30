@@ -197,7 +197,8 @@ public final class IslandRegressionTest extends Instrumentation {
                     IslandMarqueeHook.rememberCompact("iiiiiiii", true, "联系人", "iiiiiii", null);
                     view.setText("iiiiiiii");
                     IslandMarqueeHook.afterAttached(view);
-                    require(view.getMaxWidth() < view.getPaint().measureText("iiiiiiii"), "Narrow text exceeds four-character viewport");
+                    require(view.getMaxWidth() == IslandMarqueeHook.slotWidth(view), "Fixed five-glyph viewport for narrow text");
+                    int fixedWidth = view.getMaxWidth();
                     IslandMarqueeHook.rememberCompact("iiiiiiii", false, "联系人", "iiiiiii", null);
                     IslandMarqueeHook.afterAttached(view);
                     require(view.getEllipsize() != TextUtils.TruncateAt.MARQUEE && !view.isSelected(), "Disabled reattach restores view");
@@ -210,11 +211,28 @@ public final class IslandRegressionTest extends Instrumentation {
                     view.setText("四个汉字");
                     IslandMarqueeHook.afterSetText(view, view.getText());
                     require(view.getEllipsize() != TextUtils.TruncateAt.MARQUEE, "Enabled four-character message stays static");
+                    require(view.getMinWidth() == fixedWidth && view.getMaxWidth() == fixedWidth, "Short message keeps identical slot width");
+                    Notification legacy = new Notification.Builder(getTargetContext(), "test")
+                            .setSmallIcon(android.R.drawable.ic_dialog_info).setContentTitle("周末群")
+                            .setContentText("小明：今晚20:30见面").build();
+                    IslandState.Conversation split = IslandState.conversation("com.tencent.mobileqq", legacy, "周末群", "小明：今晚20:30见面", "QQ");
+                    require(split.name.equals("小明") && split.body.equals("今晚20:30见面"), "Group full-width colon split once");
+                    split = IslandState.conversation("com.tencent.mm", legacy, "周末群", "小红: https://example.com/a:b", "微信");
+                    require(split.name.equals("小红") && split.body.equals("https://example.com/a:b"), "ASCII delimiter preserves URL in body");
+                    split = IslandState.conversation("com.tencent.mm", legacy, "周末群", "[2条]小红：收到", "微信");
+                    require(split.name.equals("小红") && split.body.equals("收到"), "Legacy unread count prefix removed");
+                    split = IslandState.conversation("com.tencent.mm", legacy, "小明", "https://example.com", "微信");
+                    require(split.name.equals("小明") && split.body.equals("https://example.com"), "URL without sender stays intact");
+                    split = IslandState.conversation("test.download", legacy, "下载", "小明：文件完成", "下载工具");
+                    require(split.name.equals("下载工具") && split.body.equals("小明：文件完成"), "Non-chat body never split");
+                    require(legacy.extras.getCharSequence(Notification.EXTRA_TEXT).toString().equals("小明：今晚20:30见面"), "Expanded original remains intact");
                     Notification chat = new Notification.Builder(getTargetContext(), "test")
                             .setSmallIcon(android.R.drawable.ic_dialog_info)
                             .setStyle(new Notification.MessagingStyle(new android.app.Person.Builder().setName("自己").build())
                                     .addMessage("正文", System.currentTimeMillis(), new android.app.Person.Builder().setName("小明").build()))
                             .build();
+                    split = IslandState.conversation("com.tencent.mobileqq", chat, "群聊", "小明：摘要", "QQ");
+                    require(split.name.equals("小明") && split.body.equals("正文"), "MessagingStyle latest message has priority");
                     require("小明".equals(IslandState.contactLabel("com.tencent.mobileqq", chat, "群聊", "QQ")), "QQ uses sender");
                     require("小明".equals(IslandState.contactLabel("com.tencent.mm", chat, "群聊", "微信")), "WeChat uses sender");
                     require("下载工具".equals(IslandState.contactLabel("test.download", chat, "下载完成", "下载工具")), "Other apps use app label");
@@ -239,6 +257,9 @@ public final class IslandRegressionTest extends Instrumentation {
                 Bundle initial = IslandRuntime.call(context, "status", null);
                 int saved = initial.getInt("seconds");
                 try {
+                    Bundle pushOptions = new Bundle();
+                    pushOptions.putBoolean(IslandPresentation.PUSH, true);
+                    IslandRuntime.call(context, "presentation", pushOptions);
                     IslandRuntime.call(context, "refresh", null);
                     for (int retry = 0; retry < 20 && !IslandRuntime.call(context, "status", null).getBoolean("connected"); retry++) {
                         android.os.SystemClock.sleep(500);
@@ -255,6 +276,22 @@ public final class IslandRegressionTest extends Instrumentation {
                     Bundle showing = IslandRuntime.call(context, "status", null);
                     require(showing.getBoolean("presenting") && showing.getBoolean("test"),
                             "Test FGS starts");
+                    pushOptions.putBoolean(IslandPresentation.PUSH, false);
+                    IslandRuntime.call(context, "presentation", pushOptions);
+                    android.os.SystemClock.sleep(500);
+                    Bundle paused = IslandRuntime.call(context, "status", null);
+                    require(!paused.getBoolean(IslandPresentation.PUSH, true) && !paused.getBoolean("presenting")
+                            && !paused.getBoolean("test"), "Push off removes presenter and test state");
+                    require(paused.getBoolean("connected"), "Push off retains listener");
+                    require(paused.getBoolean("root_enabled") == initial.getBoolean("root_enabled"), "Push off retains root setting");
+                    IslandRuntime.call(context, "test", null);
+                    android.os.SystemClock.sleep(500);
+                    require(!IslandRuntime.call(context, "status", null).getBoolean("presenting"), "Disabled push blocks test start");
+                    pushOptions.putBoolean(IslandPresentation.PUSH, true);
+                    IslandRuntime.call(context, "presentation", pushOptions);
+                    IslandRuntime.call(context, "test", null);
+                    android.os.SystemClock.sleep(600);
+                    require(IslandRuntime.call(context, "status", null).getBoolean("presenting"), "Enabled push can present again");
                     // Change real runtime settings and inspect the submitted notification.
                     seconds.putInt("seconds", 60);
                     IslandRuntime.call(context, "duration", seconds);
@@ -325,6 +362,7 @@ public final class IslandRegressionTest extends Instrumentation {
                     }
                 } finally {
                     Bundle options = new Bundle();
+                    options.putBoolean(IslandPresentation.PUSH, initial.getBoolean(IslandPresentation.PUSH, true));
                     options.putBoolean(IslandPresentation.MANUAL_STOP, initial.getBoolean(IslandPresentation.MANUAL_STOP, true));
                     options.putBoolean(IslandPresentation.MARQUEE, initial.getBoolean(IslandPresentation.MARQUEE, true));
                     IslandRuntime.call(context, "presentation", options);

@@ -66,7 +66,8 @@ public final class MainActivity extends Activity {
     private Button access, promoted, notificationPermission;
     private Button usageAccess;
     private Button duration;
-    private Switch manualStop, marquee;
+    private Switch manualStop, marquee, push;
+    private Button testIsland;
     private boolean bindingOptions;
     private Bundle runtimeState = new Bundle();
     private final Runnable pollRuntime = new Runnable() {
@@ -224,9 +225,14 @@ public final class MainActivity extends Activity {
         page.addView(health);
         LinearLayout actions = CloudUi.card(this);
         section(actions, "快捷操作");
-        Button test = button("测试上岛");
-        test.setOnClickListener(v -> queryRuntime("test", null));
-        actions.addView(test);
+        push = option("流体云推送", IslandPresentation.PUSH);
+        actions.addView(push, space(-1, dp(54), 0, 0));
+        actions.addView(CloudUi.text(this, "关闭后停止上岛，消息监测和 Root 保活继续运行", 12, CloudUi.MUTED, false),
+                space(-1, -2, 0, 14));
+        testIsland = button("测试上岛");
+        testIsland.setEnabled(false);
+        testIsland.setOnClickListener(v -> queryRuntime("test", null));
+        actions.addView(testIsland);
         Button stop = button("立即下岛");
         secondary(stop);
         stop.setOnClickListener(v -> queryRuntime("stop", null));
@@ -292,7 +298,7 @@ public final class MainActivity extends Activity {
         divider(display);
         marquee = option("岛右侧文字滚动", IslandPresentation.MARQUEE);
         display.addView(marquee, space(-1, dp(54), 0, 0));
-        display.addView(CloudUi.text(this, "正文超过四个字时滚动，展开后正常显示", 12, CloudUi.MUTED, false));
+        display.addView(CloudUi.text(this, "左右各固定五字宽，正文超出时滚动，展开后正常显示", 12, CloudUi.MUTED, false));
         page.addView(display);
 
         LinearLayout permissions = CloudUi.card(this);
@@ -337,7 +343,7 @@ public final class MainActivity extends Activity {
 
         LinearLayout about = CloudUi.card(this);
         section(about, "关于云漾");
-        about.addView(CloudUi.text(this, "云漾  1.8.1", 15, CloudUi.INK, true));
+        about.addView(CloudUi.text(this, "云漾  " + BuildConfig.VERSION_NAME, 15, CloudUi.INK, true));
         about.addView(CloudUi.text(this, "Android 17 / ColorOS 17", 12, CloudUi.MUTED, false), space(-1, -2, 6, 14));
         about.addView(CloudUi.text(this, "作者  八角", 14, CloudUi.INK, true), space(-1, -2, 0, 10));
         about.addView(profileLink("GitHub", "hendudebajiao", "https://github.com/hendudebajiao"));
@@ -628,10 +634,11 @@ public final class MainActivity extends Activity {
         boolean connected = runtimeState.getBoolean("connected");
         boolean presenting = runtimeState.getBoolean("presenting");
         boolean root = runtimeState.getBoolean("root_enabled");
-        heroTitle.setText(connected ? (presenting ? "消息已上岛" : "随时待命") : "等待连接");
+        boolean pushEnabled = runtimeState.getBoolean(IslandPresentation.PUSH, true);
+        heroTitle.setText(!pushEnabled ? "推送已暂停" : connected ? (presenting ? "消息已上岛" : "随时待命") : "等待连接");
         heroSubtitle.setText(connected ? "通知监测已连接 · ColorOS 17" : "请在设置中检查通知访问权限");
         serviceState.setText("消息监测     " + (connected ? "独立运行中" : "等待连接")
-                + "\n流体云         " + (presenting ? "正在显示通知" : "等待新消息"));
+                + "\n流体云         " + (!pushEnabled ? "推送已关闭" : presenting ? "正在显示通知" : "等待新消息"));
         rootSummary.setText("Root 保活  " + (root ? "已启用" : "未启用") + "  ·  "
                 + (getSystemService(android.os.PowerManager.class).isIgnoringBatteryOptimizations(getPackageName()) ? "电池优化已豁免" : "电池优化未豁免"));
         if (!rootOperationPending) {
@@ -680,19 +687,11 @@ public final class MainActivity extends Activity {
         rootRequestId = java.util.UUID.randomUUID().toString();
         String requestId = rootRequestId;
         params.putString("operation_id", requestId);
+        // Do not put a ResultReceiver in this cross-process Bundle. ColorOS may
+        // unmarshall an anonymous Activity callback with the monitor ClassLoader,
+        // causing BadParcelableException before the Root command is reached.
         main.removeCallbacks(rootTimeout);
         main.postDelayed(rootTimeout, 45000);
-        params.putParcelable("callback", new android.os.ResultReceiver(main) {
-            @Override protected void onReceiveResult(int code, Bundle state) {
-                if (isDestroyed() || !requestId.equals(rootRequestId)) return;
-                rootOperationPending = false;
-                main.removeCallbacks(rootTimeout);
-                acceptState(state);
-                android.widget.Toast.makeText(MainActivity.this,
-                        code == 1 ? ("root_enable".equals(method) ? "Root 保活已启用" : "Root 保活已停止")
-                                : "Root 操作失败，请检查 KernelSU 授权", android.widget.Toast.LENGTH_SHORT).show();
-            }
-        });
         IslandRuntime.submit(this, method, params, reply -> {
             if (isDestroyed() || !requestId.equals(rootRequestId)) return;
             if (reply.containsKey("error")) {
@@ -704,6 +703,7 @@ public final class MainActivity extends Activity {
                 main.postDelayed(() -> { if (!isDestroyed()) queryRuntime("status", null); }, 1000);
             }
             acceptState(reply);
+            main.postDelayed(() -> { if (!isDestroyed() && requestId.equals(rootRequestId)) queryRuntime("status", null); }, 1200);
         });
     }
 
@@ -728,6 +728,9 @@ public final class MainActivity extends Activity {
         disableRoot.setEnabled(!rootOperationPending);
         if (duration != null) duration.setText(durationLabel());
         bindingOptions = true;
+        push.setChecked(state.getBoolean(IslandPresentation.PUSH, true));
+        push.setEnabled(true);
+        testIsland.setEnabled(state.getBoolean(IslandPresentation.PUSH, true));
         manualStop.setChecked(state.getBoolean(IslandPresentation.MANUAL_STOP, true));
         marquee.setChecked(state.getBoolean(IslandPresentation.MARQUEE, true));
         manualStop.setEnabled(true);

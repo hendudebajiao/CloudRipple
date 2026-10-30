@@ -8,7 +8,6 @@ import android.os.Binder;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.os.ResultReceiver;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -21,6 +20,7 @@ public final class IslandRuntimeProvider extends ContentProvider {
     private String rootOperationId = "";
     private boolean rootOperationPending;
     private boolean rootOperationSuccess;
+    private long rootOperationStarted;
 
     @Override public boolean onCreate() {
         RootKeepaliveManager.monitorCreated(requireContext());
@@ -61,11 +61,13 @@ public final class IslandRuntimeProvider extends ContentProvider {
             case "presentation":
                 if (extras == null) throw new IllegalArgumentException("Missing presentation options");
                 var edit = prefs.edit();
-                for (String key : new String[]{IslandPresentation.MANUAL_STOP, IslandPresentation.MARQUEE}) {
+                for (String key : new String[]{IslandPresentation.PUSH, IslandPresentation.MANUAL_STOP, IslandPresentation.MARQUEE}) {
                     if (extras.containsKey(key)) edit.putBoolean(key, extras.getBoolean(key));
                 }
                 edit.commit();
                 IslandForegroundService.render(context);
+                if (extras.containsKey(IslandPresentation.PUSH) && extras.getBoolean(IslandPresentation.PUSH))
+                    IslandNotificationListener.refresh(context);
                 break;
             case "test": IslandForegroundService.test(context); break;
             case "root_initialize":
@@ -89,20 +91,21 @@ public final class IslandRuntimeProvider extends ContentProvider {
                 // the same ID must not tear down/redeploy the watchdog twice.
                 String operation = extras == null ? null : extras.getString("operation_id");
                 if (!"restart_system_ui".equals(method)) {
-                    if (rootOperationPending || (operation != null && operation.equals(rootOperationId))) break;
+                    if (rootOperationPending && android.os.SystemClock.elapsedRealtime() - rootOperationStarted < 45000) break;
+                    if (operation != null && operation.equals(rootOperationId) && !rootOperationPending) break;
                     rootOperationId = operation == null ? java.util.UUID.randomUUID().toString() : operation;
                     rootOperationPending = true;
+                    rootOperationStarted = android.os.SystemClock.elapsedRealtime();
                 }
-                ResultReceiver receiver = extras == null ? null : extras.getParcelable("callback", ResultReceiver.class);
                 java.util.function.Consumer<Boolean> done = ok -> {
                     if (!"restart_system_ui".equals(method)) {
                         rootOperationPending = false;
+                        rootOperationStarted = 0;
                         rootOperationSuccess = ok;
                         prefs.edit().putString("root_status", ok
                                 ? ("root_enable".equals(method) ? "已授权" : "看护已停止")
                                 : "Root 操作失败，请检查 KernelSU").commit();
                     }
-                    if (receiver != null) receiver.send(ok ? 1 : 0, snapshot());
                 };
                 if ("root_enable".equals(method)) RootKeepaliveManager.enable(context, done);
                 else if ("root_disable".equals(method)) RootKeepaliveManager.disable(context, done);
@@ -117,6 +120,7 @@ public final class IslandRuntimeProvider extends ContentProvider {
         var context = requireContext();
         Bundle state = new Bundle();
         state.putInt("seconds", IslandLifetime.seconds(context));
+        state.putBoolean(IslandPresentation.PUSH, IslandPresentation.enabled(context, IslandPresentation.PUSH));
         state.putBoolean(IslandPresentation.MANUAL_STOP, IslandPresentation.enabled(context, IslandPresentation.MANUAL_STOP));
         state.putBoolean(IslandPresentation.MARQUEE, IslandPresentation.enabled(context, IslandPresentation.MARQUEE));
         state.putStringArrayList("packages", new ArrayList<>(IslandNotificationListener.allowedPackages(context)));

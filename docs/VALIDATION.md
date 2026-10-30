@@ -34,3 +34,20 @@
 - 使用独立测试 APK Provider 的真机序列通过：首条提交 17ms、设置进程关闭后第二条提交 5ms、下岛恢复上一条、同 key 更新持续抑制、移除重发再次展示、2 秒到期退出且监听保留。
 - 测试包和测试消息已清理，恢复 QQ、10 秒、手动下岛按钮关闭、滚动开启；Root 看护和已授权监听恢复连接。
 - 测试广播通路在该环境失败，设备日志含其他模块的 system_server Hook 与 ColorOS o-stop；未修改其他模块策略，也未将失败归因为某个特定第三方模块。
+
+
+## 1.8.2（16）Root 通信修复
+
+- Debug APK 显示版本 `1.8.2-debug`；Release 构建元数据已确认为 `1.8.2-release`。
+- 真机复现到 `BadParcelableException: ClassNotFoundException: com.bajiao.notificationisland.MainActivity$3`：匿名 `ResultReceiver` 从设置进程传入 monitor 时失败，Root 命令没有执行。
+- 移除跨进程 `ResultReceiver`，改为请求 ID、monitor 状态字段和设置页轮询。新版 Root 命令实际返回 `exit=0`，耗时 203ms；`root_enabled=true`，看护脚本、开机脚本和 `enabled` 文件存在。
+
+- 1.8.2 Debug、Release、AndroidTest 全部构建通过；真机设置页“停止保活 → 再次启用”通过，状态为已授权，按钮恢复可点击，monitor 的 `oom_score_adj=-900`。
+
+- 手动结束 monitor 后 PID 从 5346 变为 22905，随后监听恢复连接；最终 Debug 覆盖安装后 Root 状态保留为已授权、监听已连接。此项不能单独区分系统绑定与 Root 看护对恢复的贡献。
+
+- 五字宽布局版 Debug、Release、AndroidTest 离线构建通过；模型回归覆盖短正文固定宽度、关闭滚动、旧式群聊冒号拆分、URL 保留及 MessagingStyle 优先。用户在左侧补空白版本确认滚动恢复；随后仅改左侧名称居中，已安装 Debug 并重载 SystemUI。最后截图受前台聊天和消息切换影响，未独立确认全部名称长度下的视觉居中。
+- 真机最终监听已连接、Root 已启用，停留时长恢复 15 秒，临时测试 APK 已移除。GitHub Actions 的 JDK 配置改为 21，与新增守护进程配置一致；本地构建不等同于远程 CI 已通过。
+
+- 推送开关版 Debug、Release、AndroidTest 构建通过；真机模型及服务回归通过，覆盖关闭后移除展示/测试状态、监听保留、Root 设置不变、关闭期间测试入口无效、重新开启恢复展示。测试恢复 QQ/微信、15 秒及原显示选项。
+- 延迟优化版使用独立测试来源成功提交，最近一次回调到提交为 4ms；服务回归初次读取中转通知失败，清理来源后复测通过。真机另记录到一次 136ms，因此仍有偶发延迟，不能声称已消除；该耗时不包含系统投递前等待及流体云动画。

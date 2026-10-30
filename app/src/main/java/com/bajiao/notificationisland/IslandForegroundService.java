@@ -46,6 +46,13 @@ public final class IslandForegroundService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        if (!IslandPresentation.enabled(this, IslandPresentation.PUSH)) {
+            // A start already in Android's queue must still satisfy the FGS deadline.
+            postForeground(buildPlaceholder());
+            stopTest(this);
+            stopWhenIdle();
+            return START_NOT_STICKY;
+        }
         if (intent != null && ACTION_TEST.equals(intent.getAction())) {
             IslandLifetime.forget(this, IslandLifetime.TEST_KEY);
             getSharedPreferences(IslandNotificationListener.PREFS, MODE_PRIVATE)
@@ -77,6 +84,12 @@ public final class IslandForegroundService extends Service {
     public IBinder onBind(Intent intent) { return null; }
 
     static void ensureStarted(Context context) {
+        if (!IslandPresentation.enabled(context, IslandPresentation.PUSH)) {
+            stopTest(context);
+            IslandForegroundService service = running;
+            if (service != null) service.requestRender();
+            return;
+        }
         if (IslandState.current() == null && !testActive(context)) {
             IslandForegroundService service = running;
             if (service != null) service.requestRender();
@@ -119,6 +132,7 @@ public final class IslandForegroundService extends Service {
     static boolean isRunning() { return running != null; }
 
     static void test(Context context) {
+        if (!IslandPresentation.enabled(context, IslandPresentation.PUSH)) return;
         Intent intent = new Intent(context, IslandForegroundService.class).setAction(ACTION_TEST);
         try {
             context.startForegroundService(intent);
@@ -148,6 +162,12 @@ public final class IslandForegroundService extends Service {
 
     private void renderCurrent(boolean startingForeground) {
         main.removeCallbacks(expire);
+        if (!IslandPresentation.enabled(this, IslandPresentation.PUSH)) {
+            if (startingForeground) postForeground(buildPlaceholder());
+            stopTest(this);
+            stopWhenIdle();
+            return;
+        }
         IslandState.Item item = IslandState.current();
         if (testActive(this)) {
             if (scheduleExpiry(IslandLifetime.TEST_KEY)) {
@@ -162,10 +182,6 @@ public final class IslandForegroundService extends Service {
             item = IslandState.current();
         }
         boolean nextLive = item != null;
-        if (live != nextLive) {
-            // A fresh live record is required on some ColorOS builds after an idle FGS.
-            stopForeground(STOP_FOREGROUND_REMOVE);
-        }
         if (item == null) {
             // An expiry racing startForegroundService still needs to enter foreground.
             if (startingForeground) postForeground(buildPlaceholder());

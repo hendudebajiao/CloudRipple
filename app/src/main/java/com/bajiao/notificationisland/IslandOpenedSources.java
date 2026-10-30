@@ -17,7 +17,7 @@ final class IslandOpenedSources {
     }
 
     static void suppressOpened(Context context) {
-        if (!allowed(context)) return;
+        if (IslandState.current() == null || !allowed(context)) return;
         long now = System.currentTimeMillis();
         UsageEvents events = context.getSystemService(UsageStatsManager.class)
                 .queryEvents(checkedAt == 0 ? now - 10 * 60 * 1000L : checkedAt, now);

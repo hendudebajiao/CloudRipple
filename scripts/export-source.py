@@ -14,7 +14,7 @@ FILES = [
     "README.md", "CHANGELOG.md", "LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md", "PRIVACY.md",
     "build.gradle.kts", "settings.gradle.kts", "gradle.properties",
     "gradlew", "gradlew.bat", "gradle/wrapper/gradle-wrapper.jar",
-    "gradle/wrapper/gradle-wrapper.properties", "app/.gitignore",
+    "gradle/wrapper/gradle-wrapper.properties", "gradle/gradle-daemon-jvm.properties", "app/.gitignore",
     "app/build.gradle.kts", "app/proguard-rules.pro", "scripts/export-source.py",
 ]
 TREES = ["app/src/main", "app/src/debug", "app/src/androidTest", "docs", "third-party/licenses"]

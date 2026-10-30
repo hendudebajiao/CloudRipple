@@ -140,7 +140,8 @@ final class RootKeepaliveManager {
 
     /** Root fallback is allowed only for a real live item; never start an empty FGS. */
     static synchronized void retryService(Context context) {
-        if (!isEnabled(context) || (IslandState.current() == null && !IslandForegroundService.testActive(context))
+        if (!isEnabled(context) || !IslandPresentation.enabled(context, IslandPresentation.PUSH)
+                || (IslandState.current() == null && !IslandForegroundService.testActive(context))
                 || android.os.SystemClock.elapsedRealtime() - lastRetry < 1000) return;
         lastRetry = android.os.SystemClock.elapsedRealtime();
         Context app = context.getApplicationContext();
@@ -183,14 +184,19 @@ final class RootKeepaliveManager {
 
     private static boolean runRoot(String command) {
         Process process = null;
+        long started = android.os.SystemClock.elapsedRealtime();
+        Log.i("NotificationIsland", "Root command started");
         try {
             process = new ProcessBuilder("su", "-c", command)
                     .redirectOutput(new File("/dev/null"))
                     .redirectError(new File("/dev/null")).start();
             if (!process.waitFor(20, TimeUnit.SECONDS)) {
                 process.destroyForcibly();
+                Log.w("NotificationIsland", "Root command timed out after 20s");
                 return false;
             }
+            Log.i("NotificationIsland", "Root command completed exit=" + process.exitValue()
+                    + " elapsedMs=" + (android.os.SystemClock.elapsedRealtime() - started));
             return process.exitValue() == 0;
         } catch (IOException error) {
             Log.w("NotificationIsland", "su execution failed", error);

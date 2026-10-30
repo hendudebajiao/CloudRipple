@@ -69,7 +69,7 @@ public final class MainModule extends XposedModule {
                             catch (RuntimeException error) { log(Log.WARN, TAG, "Marquee attach skipped: " + error); }
                             return result;
                         });
-                log(Log.INFO, TAG, "SystemUI relay-text marquee hook installed");
+                log(Log.INFO, TAG, "SystemUI relay-text marquee hook installed (five-cell-left-pad-v2)");
             } catch (ReflectiveOperationException | LinkageError error) {
                 log(Log.WARN, TAG, "Marquee hook unavailable: " + error);
             }

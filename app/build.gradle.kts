@@ -10,16 +10,20 @@ android {
         applicationId = "com.bajiao.notificationisland"
         minSdk = 29
         targetSdk = 37
-        versionCode = 15
-        versionName = "1.8.1"
+        versionCode = 16
+        versionName = "1.8.2"
     }
 
     lint {
         targetSdk = 37
     }
 
+    buildFeatures { buildConfig = true }
+
     buildTypes {
+        debug { versionNameSuffix = "-debug" }
         release {
+            versionNameSuffix = "-release"
             isMinifyEnabled = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
