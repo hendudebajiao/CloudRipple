@@ -26,7 +26,7 @@ public final class IslandNotificationListener extends NotificationListenerServic
     private final Runnable activeSync = new Runnable() {
         @Override public void run() {
             syncActive();
-            main.postDelayed(this, 3000L);
+            if (bound) main.postDelayed(this, 3000L);
         }
     };
     private boolean firstSync = true;
@@ -48,6 +48,7 @@ public final class IslandNotificationListener extends NotificationListenerServic
     public void onListenerConnected() {
         connected = this;
         bound = true;
+        firstSync = true;
         main.removeCallbacks(reconnect);
         Log.i(TAG, "Listener connected; allowed=" + allowedPackages(this));
         IslandState.init(this);
@@ -116,7 +117,7 @@ public final class IslandNotificationListener extends NotificationListenerServic
             int accepted = 0;
             IslandState.reconcile(keys, allowed);
             Arrays.sort(active, Comparator.comparingLong(StatusBarNotification::getPostTime));
-            for (StatusBarNotification sbn : active) if (accepts(sbn)) { accepted++; IslandState.sync(sbn); }
+            for (StatusBarNotification sbn : active) if (accepts(sbn, allowed)) { accepted++; IslandState.sync(sbn); }
             IslandOpenedSources.suppressOpened(this);
             if (firstSync || !same(before, IslandState.current()))
                 Log.i(TAG, "Active sync total=" + active.length + ", accepted=" + accepted);
@@ -128,6 +129,16 @@ public final class IslandNotificationListener extends NotificationListenerServic
                 IslandForegroundService.render(this);
             }
             firstSync = false;
+        } catch (SecurityException e) {
+            // A stale system token is not a healthy connection. Stop snapshot polling
+            // and request a rebind only if access is still granted by the user.
+            if (connected == this) connected = null;
+            bound = false;
+            main.removeCallbacks(activeSync);
+            main.removeCallbacks(reconnect);
+            if (getSystemService(NotificationManager.class).isNotificationListenerAccessGranted(
+                    new ComponentName(this, IslandNotificationListener.class))) main.post(reconnect);
+            Log.w(TAG, "Listener token invalid; requesting authorized rebind", e);
         } catch (RuntimeException e) {
             Log.w(TAG, "Cannot read active notifications", e);
         }
@@ -162,9 +173,13 @@ public final class IslandNotificationListener extends NotificationListenerServic
     }
 
     private boolean accepts(StatusBarNotification sbn) {
+        return accepts(sbn, allowedPackages(this));
+    }
+
+    private boolean accepts(StatusBarNotification sbn, Set<String> allowed) {
         return sbn != null && !sbn.getPackageName().equals(getPackageName())
                 && (sbn.getNotification().flags & android.app.Notification.FLAG_GROUP_SUMMARY) == 0
-                && allowedPackages(this).contains(sbn.getPackageName());
+                && allowed.contains(sbn.getPackageName());
     }
 
     static void stopIsland(android.content.Context context) {

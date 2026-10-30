@@ -67,6 +67,26 @@ public final class IslandRegressionTest extends Instrumentation {
                 finish(Activity.RESULT_OK, result);
                 return;
             }
+            final int[] attempts = {0};
+            Bundle retried = IslandRuntime.callWithRetry(() -> {
+                if (attempts[0]++ == 0) throw new android.os.DeadObjectException();
+                Bundle ok = new Bundle(); ok.putBoolean("recovered", true); return ok;
+            });
+            require(retried.getBoolean("recovered") && attempts[0] == 2, "Dead provider reacquired once");
+            attempts[0] = 0;
+            try {
+                IslandRuntime.callWithRetry(() -> { attempts[0]++; throw new SecurityException("revoked"); });
+                throw new AssertionError("SecurityException expected");
+            } catch (SecurityException expected) {
+                require(attempts[0] == 1, "Access denial never retried");
+            }
+            attempts[0] = 0;
+            try {
+                IslandRuntime.callWithRetry(() -> { attempts[0]++; throw new android.os.DeadObjectException(); });
+                throw new AssertionError("Bounded disconnect expected");
+            } catch (IllegalStateException expected) {
+                require(attempts[0] == 2, "Dead provider recovery bounded");
+            }
             // Model checks must never write the live runtime's settings from this process.
             android.content.Context modelContext = new android.content.ContextWrapper(getTargetContext()) {
                 @Override public android.content.Context getApplicationContext() { return this; }
@@ -138,21 +158,58 @@ public final class IslandRegressionTest extends Instrumentation {
                     CharSequence text = restored.extras.getCharSequence(Notification.EXTRA_TEXT);
                     require(text instanceof Spanned, "Marquee annotation survives notification parceling");
                     TextView view = new TextView(getContext());
+                    view.setText(text);
                     IslandMarqueeHook.afterSetText(view, text);
                     require(view.getEllipsize() != TextUtils.TruncateAt.MARQUEE, "Expanded text stays normal");
                     android.widget.FrameLayout right = new android.widget.FrameLayout(getContext());
                     right.setId(getContext().getResources().getIdentifier("right_section", "id", getContext().getPackageName()));
                     right.addView(view);
                     IslandMarqueeHook.rememberCompact(text.toString(), true, "联系人", "超过四字", null);
+                    view.setText(text);
                     IslandMarqueeHook.afterSetText(view, text);
                     require(view.getEllipsize() == TextUtils.TruncateAt.MARQUEE && view.isSelected(), "Right section marquee enabled");
+                    android.text.Layout stable = view.getLayout();
+                    final int[] textChanges = {0};
+                    view.addTextChangedListener(new android.text.TextWatcher() {
+                        public void beforeTextChanged(CharSequence v, int start, int count, int after) {}
+                        public void onTextChanged(CharSequence v, int start, int before, int count) { textChanges[0]++; }
+                        public void afterTextChanged(android.text.Editable v) {}
+                    });
+                    view.getViewTreeObserver().dispatchOnPreDraw();
+                    view.getViewTreeObserver().dispatchOnPreDraw();
+                    require(textChanges[0] == 0 && stable == view.getLayout(), "Unchanged frames never reset marquee text/layout");
+                    view.setSelected(false);
+                    view.setEllipsize(TextUtils.TruncateAt.END);
+                    view.setMaxLines(2);
+                    view.getViewTreeObserver().dispatchOnPreDraw();
+                    require(view.isSelected() && view.getEllipsize() == TextUtils.TruncateAt.MARQUEE
+                            && view.getMaxLines() == 1, "System template property reset repaired before draw");
                     IslandMarqueeHook.rememberCompact(text.toString(), false, "联系人", "超过四字", null);
+                    view.setText(text);
                     IslandMarqueeHook.afterSetText(view, text);
                     require(view.getEllipsize() != TextUtils.TruncateAt.MARQUEE, "Right section marquee disabled");
+                    view.setText("普通通知");
                     IslandMarqueeHook.afterSetText(view, "普通通知");
                     require(view.getEllipsize() != TextUtils.TruncateAt.MARQUEE && !view.isSelected(), "Reused view restored");
+                    view.setText("四个汉字");
                     IslandMarqueeHook.afterSetText(view, IslandMarquee.mark("四个汉字"));
                     require(view.getEllipsize() != TextUtils.TruncateAt.MARQUEE, "Four characters stay static");
+                    IslandMarqueeHook.rememberCompact("iiiiiiii", true, "联系人", "iiiiiii", null);
+                    view.setText("iiiiiiii");
+                    IslandMarqueeHook.afterAttached(view);
+                    require(view.getMaxWidth() < view.getPaint().measureText("iiiiiiii"), "Narrow text exceeds four-character viewport");
+                    IslandMarqueeHook.rememberCompact("iiiiiiii", false, "联系人", "iiiiiii", null);
+                    IslandMarqueeHook.afterAttached(view);
+                    require(view.getEllipsize() != TextUtils.TruncateAt.MARQUEE && !view.isSelected(), "Disabled reattach restores view");
+                    IslandMarqueeHook.rememberCompact("iiiiiiii", true, "联系人", "iiiiiii", null);
+                    IslandMarqueeHook.afterSetText(view, view.getText());
+                    view.setText("其他软件的通知");
+                    IslandMarqueeHook.afterAttached(view);
+                    require(view.getEllipsize() != TextUtils.TruncateAt.MARQUEE && !view.isSelected(), "Recycled view reattach revalidates source");
+                    IslandMarqueeHook.rememberCompact("四个汉字", true, "联系人", "四个汉字", null);
+                    view.setText("四个汉字");
+                    IslandMarqueeHook.afterSetText(view, view.getText());
+                    require(view.getEllipsize() != TextUtils.TruncateAt.MARQUEE, "Enabled four-character message stays static");
                     Notification chat = new Notification.Builder(getTargetContext(), "test")
                             .setSmallIcon(android.R.drawable.ic_dialog_info)
                             .setStyle(new Notification.MessagingStyle(new android.app.Person.Builder().setName("自己").build())

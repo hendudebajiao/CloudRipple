@@ -11,7 +11,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 FILES = [
     ".gitignore", ".gitattributes", ".github/workflows/build.yml",
-    "README.md", "LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md", "PRIVACY.md",
+    "README.md", "CHANGELOG.md", "LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md", "PRIVACY.md",
     "build.gradle.kts", "settings.gradle.kts", "gradle.properties",
     "gradlew", "gradlew.bat", "gradle/wrapper/gradle-wrapper.jar",
     "gradle/wrapper/gradle-wrapper.properties", "app/.gitignore",

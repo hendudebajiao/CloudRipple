@@ -51,17 +51,14 @@ public final class IslandForegroundService extends Service {
             getSharedPreferences(IslandNotificationListener.PREFS, MODE_PRIVATE)
                     .edit().putBoolean(KEY_TEST, true).commit();
         }
-        // Even an already-expired item must satisfy the FGS start contract before
-        // renderCurrent removes it. Otherwise Android later crashes the process.
-        IslandState.Item initial = IslandState.current();
-        postForeground(testActive(this) ? buildTest() : initial == null ? buildPlaceholder() : buildLive(initial));
-        live = testActive(this) || initial != null;
         if (IslandState.current() == null && !testActive(this)) {
+            postForeground(buildPlaceholder());
+            live = false;
             // A restarted process first needs its listener snapshot. Meet the FGS
             // deadline, then remove this transient record if no source exists.
             main.postDelayed(this::renderCurrent, 4000L);
         } else {
-            main.post(this::renderCurrent);
+            renderCurrent(true);
         }
         if (!IslandNotificationListener.isConnected()) IslandNotificationListener.refresh(this);
         return START_STICKY;
@@ -147,7 +144,9 @@ public final class IslandForegroundService extends Service {
         super.onTaskRemoved(rootIntent);
     }
 
-    private void renderCurrent() {
+    private void renderCurrent() { renderCurrent(false); }
+
+    private void renderCurrent(boolean startingForeground) {
         main.removeCallbacks(expire);
         IslandState.Item item = IslandState.current();
         if (testActive(this)) {
@@ -168,6 +167,8 @@ public final class IslandForegroundService extends Service {
             stopForeground(STOP_FOREGROUND_REMOVE);
         }
         if (item == null) {
+            // An expiry racing startForegroundService still needs to enter foreground.
+            if (startingForeground) postForeground(buildPlaceholder());
             stopWhenIdle();
         } else {
             postForeground(buildLive(item));

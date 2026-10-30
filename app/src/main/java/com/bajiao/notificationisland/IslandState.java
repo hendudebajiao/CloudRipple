@@ -83,13 +83,23 @@ final class IslandState {
                 for (Icon icon : new Icon[]{notification.getLargeIcon(), notification.getSmallIcon()}) {
                     if (icon == null) continue;
                     try {
+                        String cacheKey = null;
+                        if (icon.getType() == Icon.TYPE_RESOURCE) {
+                            String resourcePackage = icon.getResPackage();
+                            if (resourcePackage == null || resourcePackage.isEmpty()) resourcePackage = pkg;
+                            long version = appContext.getPackageManager().getPackageInfo(resourcePackage, 0).lastUpdateTime;
+                            cacheKey = resourcePackage + ":" + version + ":" + icon.getResId();
+                            Bitmap cached = resourceIcons.get(cacheKey);
+                            if (cached != null) return cached;
+                        }
                         Drawable drawable = icon.loadDrawable(appContext);
                         if (drawable == null) continue;
                         Bitmap bitmap = Bitmap.createBitmap(96, 96, Bitmap.Config.ARGB_8888);
                         drawable.setBounds(0, 0, 96, 96);
                         drawable.draw(new Canvas(bitmap));
+                        if (cacheKey != null) resourceIcons.put(cacheKey, bitmap);
                         return bitmap;
-                    } catch (RuntimeException ignored) {}
+                    } catch (android.content.pm.PackageManager.NameNotFoundException | RuntimeException ignored) {}
                 }
             }
             return iconFor(pkg);
@@ -104,6 +114,7 @@ final class IslandState {
     private static final List<Item> stack = new ArrayList<>();
     private static final Set<String> suppressed = new HashSet<>();
     private static final android.util.LruCache<String, Bitmap> icons = new android.util.LruCache<>(32);
+    private static final android.util.LruCache<String, Bitmap> resourceIcons = new android.util.LruCache<>(32);
     private static final android.util.LruCache<String, String> labels = new android.util.LruCache<>(64);
     private static Context appContext;
 

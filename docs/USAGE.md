@@ -12,13 +12,13 @@ Root 启用还会通过 appops 允许本应用的使用情况访问，用于识�
 
 `root_setup_attempted` 是云漾保存的“已经做过初始化尝试”，KernelSU 授权记录则由 Root 管理器保存。首次拒绝、失败、进程中断后，云漾不会在每次进入时反复弹请求。
 
-当前界面没有 Root 设置区，也没有重试入口。开发者可在 KernelSU 允许该包后，通过下面的 Root 私有接口显式重试，而不是清空全部应用数据：
+设置页的“Root 保活”卡片显示已保存的授权状态。“启用 / 刷新 Root 保活”可在首次失败后手动重试或重新部署看护；“停止 Root 保活”用于清理看护。操作期间两个按钮禁用，完成后恢复。首次自动授权逻辑保留，日常进入界面不重新检测或弹出授权。开发者也可通过下面的 Root 私有接口显式重试：
 
 ```bash
 adb shell su -c 'content call --user 0 --uri content://com.bajiao.notificationisland.runtime --method root_enable'
 ```
 
-撤回 su 授权**不等于已经结束先前启动的 Root shell**。需要彻底移除看护时，应先在授权仍可用的情况下显式停止，随后再撤销 Root 权限或卸载：
+撤回 su 授权**不等于已经结束先前启动的 Root shell**。需要彻底移除看护时，应先在授权仍可用的情况下点击“停止 Root 保活”，随后再撤销 Root 权限或卸载。等效的开发接口为：
 
 ```bash
 adb shell su -c 'content call --user 0 --uri content://com.bajiao.notificationisland.runtime --method root_disable'

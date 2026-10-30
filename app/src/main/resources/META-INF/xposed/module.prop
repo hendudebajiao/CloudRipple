@@ -1,8 +1,8 @@
 # libxposed module properties
 id=com.bajiao.notificationisland
 name=云漾
-version=1.8.0
-versionCode=14
+version=1.8.1
+versionCode=15
 author=八角
 description=将指定应用通知转为 ColorOS 17 Android 17 Live Update，并提供 KernelSU 保活。
 minApiVersion=102

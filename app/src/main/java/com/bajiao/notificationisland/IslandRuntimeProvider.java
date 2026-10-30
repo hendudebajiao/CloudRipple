@@ -18,6 +18,9 @@ import java.util.concurrent.TimeUnit;
 /** Sole settings owner in :monitor; commands are serialized with listener/service callbacks. */
 public final class IslandRuntimeProvider extends ContentProvider {
     private final Handler main = new Handler(Looper.getMainLooper());
+    private String rootOperationId = "";
+    private boolean rootOperationPending;
+    private boolean rootOperationSuccess;
 
     @Override public boolean onCreate() {
         RootKeepaliveManager.monitorCreated(requireContext());
@@ -82,9 +85,19 @@ public final class IslandRuntimeProvider extends ContentProvider {
             case "root_enable":
             case "root_disable":
             case "restart_system_ui":
+                // A Binder reply can be lost after the command was accepted. Retrying
+                // the same ID must not tear down/redeploy the watchdog twice.
+                String operation = extras == null ? null : extras.getString("operation_id");
+                if (!"restart_system_ui".equals(method)) {
+                    if (rootOperationPending || (operation != null && operation.equals(rootOperationId))) break;
+                    rootOperationId = operation == null ? java.util.UUID.randomUUID().toString() : operation;
+                    rootOperationPending = true;
+                }
                 ResultReceiver receiver = extras == null ? null : extras.getParcelable("callback", ResultReceiver.class);
                 java.util.function.Consumer<Boolean> done = ok -> {
                     if (!"restart_system_ui".equals(method)) {
+                        rootOperationPending = false;
+                        rootOperationSuccess = ok;
                         prefs.edit().putString("root_status", ok
                                 ? ("root_enable".equals(method) ? "已授权" : "看护已停止")
                                 : "Root 操作失败，请检查 KernelSU").commit();
@@ -115,6 +128,9 @@ public final class IslandRuntimeProvider extends ContentProvider {
         state.putString("source_key", current == null ? null : current.sourceKey);
         // Status deliberately carries no notification text or PendingIntent.
         state.putBoolean("root_enabled", RootKeepaliveManager.isEnabled(context));
+        state.putString("root_operation_id", rootOperationId);
+        state.putBoolean("root_operation_pending", rootOperationPending);
+        state.putBoolean("root_operation_success", rootOperationSuccess);
         state.putBoolean("root_setup_attempted", context.getSharedPreferences(IslandNotificationListener.PREFS, 0)
                 .getBoolean("root_setup_attempted", false));
         state.putString("root_status", context.getSharedPreferences(IslandNotificationListener.PREFS, 0)

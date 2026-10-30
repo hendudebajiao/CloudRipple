@@ -46,7 +46,18 @@ public final class MainActivity extends Activity {
     private int currentPage;
     private Bundle restoredUi;
     private TextView heroTitle, heroSubtitle, serviceState, selectionSummary, durationSummary, rootSummary;
-    private TextView permissionSummary;
+    private TextView permissionSummary, rootStatus;
+    private Button enableRoot, disableRoot;
+    private boolean rootOperationPending;
+    private String rootRequestId;
+    private final Runnable rootTimeout = () -> {
+        if (!rootOperationPending || isDestroyed()) return;
+        rootOperationPending = false;
+        enableRoot.setEnabled(true);
+        disableRoot.setEnabled(true);
+        rootStatus.setText("操作结果尚未返回，正在读取已保存状态…");
+        queryRuntime("status", null);
+    };
     private final java.util.List<View> insetScrolls = new ArrayList<>();
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -97,6 +108,7 @@ public final class MainActivity extends Activity {
 
     @Override protected void onDestroy() {
         worker.shutdownNow();
+        main.removeCallbacks(rootTimeout);
         super.onDestroy();
     }
 
@@ -307,9 +319,25 @@ public final class MainActivity extends Activity {
         permissions.addView(usageAccess);
         page.addView(permissions);
 
+        LinearLayout rootCard = CloudUi.card(this);
+        section(rootCard, "Root 保活");
+        rootStatus = CloudUi.text(this, "正在读取已保存状态…", 13, CloudUi.MUTED, false);
+        rootStatus.setLineSpacing(dp(5), 1);
+        rootCard.addView(rootStatus, space(-1, -2, 0, 14));
+        enableRoot = button("启用 / 刷新 Root 保活");
+        enableRoot.setEnabled(false);
+        enableRoot.setOnClickListener(v -> rootCommand("root_enable"));
+        rootCard.addView(enableRoot);
+        disableRoot = button("停止 Root 保活");
+        disableRoot.setEnabled(false);
+        secondary(disableRoot);
+        disableRoot.setOnClickListener(v -> rootCommand("root_disable"));
+        rootCard.addView(disableRoot, space(-1, dp(48), 10, 0));
+        page.addView(rootCard);
+
         LinearLayout about = CloudUi.card(this);
         section(about, "关于云漾");
-        about.addView(CloudUi.text(this, "云漾  1.8.0", 15, CloudUi.INK, true));
+        about.addView(CloudUi.text(this, "云漾  1.8.1", 15, CloudUi.INK, true));
         about.addView(CloudUi.text(this, "Android 17 / ColorOS 17", 12, CloudUi.MUTED, false), space(-1, -2, 6, 14));
         about.addView(CloudUi.text(this, "作者  八角", 14, CloudUi.INK, true), space(-1, -2, 0, 10));
         about.addView(profileLink("GitHub", "hendudebajiao", "https://github.com/hendudebajiao"));
@@ -606,6 +634,10 @@ public final class MainActivity extends Activity {
                 + "\n流体云         " + (presenting ? "正在显示通知" : "等待新消息"));
         rootSummary.setText("Root 保活  " + (root ? "已启用" : "未启用") + "  ·  "
                 + (getSystemService(android.os.PowerManager.class).isIgnoringBatteryOptimizations(getPackageName()) ? "电池优化已豁免" : "电池优化未豁免"));
+        if (!rootOperationPending) {
+            rootStatus.setText(runtimeState.getString("root_status", "正在读取已保存状态…")
+                    + "\n仅保护云漾的通知监测服务");
+        }
         permissionSummary.setText("通知访问  " + (listener ? "已授权" : "未开启") + "  ·  通知权限  " + (notifications ? "已开启" : "未开启")
                 + "\nLive Update  " + (live ? "可用" : "未开启") + "  ·  自动下岛识别  " + (IslandOpenedSources.allowed(this) ? "已授权" : "未开启"));
         ArrayList<String> packages = runtimeState.getStringArrayList("packages");
@@ -638,6 +670,43 @@ public final class MainActivity extends Activity {
         openNotificationSettings();
     }
 
+    private void rootCommand(String method) {
+        if (rootOperationPending) return;
+        rootOperationPending = true;
+        enableRoot.setEnabled(false);
+        disableRoot.setEnabled(false);
+        rootStatus.setText("root_enable".equals(method) ? "正在请求授权并启动保活…" : "正在停止保活…");
+        Bundle params = new Bundle();
+        rootRequestId = java.util.UUID.randomUUID().toString();
+        String requestId = rootRequestId;
+        params.putString("operation_id", requestId);
+        main.removeCallbacks(rootTimeout);
+        main.postDelayed(rootTimeout, 45000);
+        params.putParcelable("callback", new android.os.ResultReceiver(main) {
+            @Override protected void onReceiveResult(int code, Bundle state) {
+                if (isDestroyed() || !requestId.equals(rootRequestId)) return;
+                rootOperationPending = false;
+                main.removeCallbacks(rootTimeout);
+                acceptState(state);
+                android.widget.Toast.makeText(MainActivity.this,
+                        code == 1 ? ("root_enable".equals(method) ? "Root 保活已启用" : "Root 保活已停止")
+                                : "Root 操作失败，请检查 KernelSU 授权", android.widget.Toast.LENGTH_SHORT).show();
+            }
+        });
+        IslandRuntime.submit(this, method, params, reply -> {
+            if (isDestroyed() || !requestId.equals(rootRequestId)) return;
+            if (reply.containsKey("error")) {
+                rootOperationPending = false;
+                main.removeCallbacks(rootTimeout);
+                enableRoot.setEnabled(true);
+                disableRoot.setEnabled(true);
+                rootStatus.setText("暂时无法连接监测服务，已保存的 Root 状态未更改");
+                main.postDelayed(() -> { if (!isDestroyed()) queryRuntime("status", null); }, 1000);
+            }
+            acceptState(reply);
+        });
+    }
+
     private void queryRuntime(String method, Bundle params) {
         IslandRuntime.submit(this, method, params, this::acceptState);
     }
@@ -648,7 +717,15 @@ public final class MainActivity extends Activity {
             android.widget.Toast.makeText(this, state.getString("error"), android.widget.Toast.LENGTH_SHORT).show();
             return;
         }
+        if (rootOperationPending && rootRequestId != null
+                && rootRequestId.equals(state.getString("root_operation_id"))
+                && !state.getBoolean("root_operation_pending")) {
+            rootOperationPending = false;
+            main.removeCallbacks(rootTimeout);
+        }
         runtimeState = state;
+        enableRoot.setEnabled(!rootOperationPending);
+        disableRoot.setEnabled(!rootOperationPending);
         if (duration != null) duration.setText(durationLabel());
         bindingOptions = true;
         manualStop.setChecked(state.getBoolean(IslandPresentation.MANUAL_STOP, true));

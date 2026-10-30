@@ -74,7 +74,8 @@ sequenceDiagram
 
 ## 状态与跨进程边界
 
-- `IslandRuntime` 是配置页的异步 IPC 客户端。未导出的 `IslandRuntimeProvider` 仅接受同 UID 或 Root 调用，并将命令串行化到 monitor 主线程。
+- `IslandRuntime` 是配置页的异步 IPC 客户端。后台 Binder 死亡后最多重新获取 Provider 一次，权限拒绝不重试。Root 按钮通过请求 ID 避免同进程内重复部署；回调丢失可通过状态轮询恢复按钮，并在 45 秒后解除等待。进程重建会丢失操作 ID，随后读取持久化授权结果；暂时通信失败不会覆盖已保存的 Root 状态。
+- `IslandRuntime`未导出的 `IslandRuntimeProvider` 仅接受同 UID 或 Root 调用，并将命令串行化到 monitor 主线程。
 - 允许列表、时长、显示开关、Root 状态、抑制 key 和期限保存在应用私有 SharedPreferences，由 monitor 持有。配置页不直接读写这份偏好，避免多进程缓存不一致。
 - 标题、正文、bitmap、原通知及点击 Intent 主要留在内存；监听重连后通过 `getActiveNotifications()` 重建。通知 key 和期限会持久化，直至原通知移除或同步修剪。
 - 内部接口以当前源码为准，例如 `status`、`selection`、`duration`、`presentation`、`stop`、`test`、`refresh`、`root_initialize`。不把它们当作可供其他应用调用的公开 API。
@@ -83,7 +84,7 @@ sequenceDiagram
 
 核心监听和 Live Update 发布使用公开 API。SystemUI Hook 只增强云漾中转通知的呈现：从自有 extras 取完整短状态正文，定位 `right_section` 开启原生 TextView marquee；在 `left_section` 绑定来源图标，并显示联系人或应用名称。展开面板正文保持普通文本。
 
-滚动使用视图自身的 marquee，不定时截字、不循环重发通知，避免反复触发上岛动画。Hook 识别带有本包标记的通知，但目前还依赖 `capsule`、`left_section`、`right_section` 等 ColorOS 资源结构，ROM 更新需要重新验证。当前文本匹配与单槽位记忆也有局限，不能宣称对所有插件版本完全通用。
+滚动使用视图自身的 marquee，不定时截字、不循环重发通知，避免反复触发上岛动画。1.8.1 为已绑定的右侧标题添加绘制前校正：系统重设单行、宽度、ellipsize 或 selected 后恢复滚动；属性正确时不重复设置文本和选择状态。窗口宽度按前四个 Unicode 码点实际测量，避免窄英文不足四个 em 而不滚动；复用或关闭滚动后恢复原属性，分离时移除绘制观察器。Hook 识别带有本包标记的通知，但目前还依赖 `capsule`、`left_section`、`right_section` 等 ColorOS 资源结构，ROM 更新需要重新验证。当前文本匹配与单槽位记忆也有局限，不能宣称对所有插件版本完全通用。
 
 ## Root 看护与恢复
 
@@ -106,6 +107,8 @@ sequenceDiagram
 - 看护和恢复任务仍需执行 su；“首次授权”指用户只需作出首次授权决定，不代表后续从不使用 Root。系统或其他管理器显式强停仍可能导致恢复延迟。
 
 ## 性能与已知边界
+
+1.8.1 移除服务启动时的重复 Live Update 提交，首次展示期限改为内存立即生效、异步写盘；意外掉电前最后一次期限写入可能丢失。小资源图标使用容量受限、含包更新时间的缓存，大图标仍按通知更新读取。监听令牌失效时标记断连，并只在用户已授权时请求重绑。
 
 消息入口不查询 UsageStats，不跨默认进程转发事件；已有服务直接更新，应用名及应用图标缓存避免重复加载。诊断中的 `relay_latency_ms` 仅统计本模块回调到提交通知，不能衡量来源网络推送、系统排队或流体云动画。
 

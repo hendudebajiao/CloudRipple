@@ -22,7 +22,7 @@ final class IslandLifetime {
         SharedPreferences p = prefs(context);
         if (p.contains(PREFIX + key)) return p.getLong(PREFIX + key, 0);
         long deadline = seconds(context) == 0 ? 0 : now + seconds(context) * 1000L;
-        p.edit().putLong(PREFIX + key, deadline).commit();
+        p.edit().putLong(PREFIX + key, deadline).apply();
         return deadline;
     }
 
