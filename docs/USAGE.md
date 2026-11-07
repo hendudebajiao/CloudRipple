@@ -12,7 +12,7 @@ Root 启用还会通过 appops 允许本应用的使用情况访问，用于识�
 
 `root_setup_attempted` 是云漾保存的“已经做过初始化尝试”，KernelSU 授权记录则由 Root 管理器保存。首次拒绝、失败、进程中断后，云漾不会在每次进入时反复弹请求。
 
-设置页的“Root 保活”卡片显示已保存的授权状态。“启用 / 刷新 Root 保活”可在首次失败后手动重试或重新部署看护；“停止 Root 保活”用于清理看护。操作期间两个按钮禁用，完成后恢复。首次自动授权逻辑保留，日常进入界面不重新检测或弹出授权。开发者也可通过下面的 Root 私有接口显式重试：
+首页状态卡片内的“Root 保活”入口提供“启用 / 刷新”和“停止保活”。前者可在首次失败后手动重试或重新部署看护；后者用于清理看护。操作期间两个按钮禁用，完成后恢复。首次自动授权逻辑保留，日常进入界面不重新检测或弹出授权。开发者也可通过下面的 Root 私有接口显式重试：
 
 ```bash
 adb shell su -c 'content call --user 0 --uri content://com.bajiao.notificationisland.runtime --method root_enable'
@@ -24,7 +24,7 @@ adb shell su -c 'content call --user 0 --uri content://com.bajiao.notificationis
 adb shell su -c 'content call --user 0 --uri content://com.bajiao.notificationisland.runtime --method root_disable'
 ```
 
-停止操作会清理本应用看护和开机入口、移除 Doze 白名单并恢复监测进程回收分值。仅卸载 APK 时，Android 不保证清除 `/data/adb` 里的脚本；如果 APK 已卸载，需由机主在 Root 文件管理器中核对并移除 `notification-island.sh` 及 `/data/adb/notification_island/`。不要清理其他应用目录。
+停止操作会清理本应用看护和开机入口、移除 Doze 白名单并恢复监测进程回收分值。1.8.3 的看护每 10 秒检查所属用户的安装状态与 UID，确认应用持续缺失 30 秒后自动退出，删除自有脚本和启用标记，并移除白名单；通常卸载后约 30–40 秒完成清理。覆盖更新保留宽限期，包管理查询超时或异常时不会删除。看护已被外部终止时，需要下次启动开机脚本并解锁后才能检测；升级前部署的旧脚本应先安装新版并启用 / 刷新一次。
 
 ## 行为说明
 

@@ -45,7 +45,7 @@ public final class MainActivity extends Activity {
     private CloudUi.Navigation navigation;
     private int currentPage;
     private Bundle restoredUi;
-    private TextView heroTitle, heroSubtitle, serviceState, selectionSummary, durationSummary, rootSummary;
+    private TextView heroTitle, heroSubtitle, serviceState, selectionSummary, durationSummary;
     private TextView permissionSummary, rootStatus;
     private Button enableRoot, disableRoot;
     private boolean rootOperationPending;
@@ -180,11 +180,13 @@ public final class MainActivity extends Activity {
         LinearLayout intro = new LinearLayout(this);
         intro.setGravity(Gravity.CENTER_VERTICAL);
         LinearLayout words = CloudUi.column(this);
-        words.addView(CloudUi.text(this, "原生流体云", 12, CloudUi.BLUE, true));
-        heroTitle = CloudUi.text(this, "正在连接", 26, CloudUi.INK, true);
+        words.addView(CloudUi.text(this, "运行状态", 12, CloudUi.BLUE, true));
+        heroTitle = CloudUi.text(this, "正在检查权限…", 26, CloudUi.INK, true);
         words.addView(heroTitle, space(-1, -2, 10, 7));
-        heroSubtitle = CloudUi.text(this, "读取通知监测状态…", 12, CloudUi.MUTED, false);
-        words.addView(heroSubtitle);
+        serviceState = CloudUi.text(this, "", 14, CloudUi.INK, false);
+        serviceState.setLineSpacing(dp(9), 1);
+        serviceState.setVisibility(View.GONE);
+        words.addView(serviceState, space(-1, -2, 10, 0));
         intro.addView(words, new LinearLayout.LayoutParams(0, -2, 1));
         android.widget.ImageView logo = new android.widget.ImageView(this);
         logo.setImageResource(R.drawable.ic_app_icon);
@@ -192,8 +194,25 @@ public final class MainActivity extends Activity {
         logo.setClipToOutline(true);
         intro.addView(logo, new LinearLayout.LayoutParams(dp(78), dp(78)));
         hero.addView(intro);
-        TextView hint = CloudUi.text(this, "消息监测独立运行，关闭界面后仍可接收通知", 12, 0xff6584AA, false);
-        hero.addView(hint, space(-1, -2, 22, 0));
+        heroSubtitle = CloudUi.text(this, "", 12, CloudUi.MUTED, false);
+        heroSubtitle.setLineSpacing(dp(4), 1);
+        heroSubtitle.setVisibility(View.GONE);
+        hero.addView(heroSubtitle, space(-1, -2, 14, 0));
+        divider(hero);
+        section(hero, "Root 保活");
+        rootStatus = CloudUi.text(this, "正在读取已保存状态…", 13, CloudUi.MUTED, false);
+        rootStatus.setLineSpacing(dp(5), 1);
+        hero.addView(rootStatus, space(-1, -2, 0, 14));
+        enableRoot = button("启用 / 刷新");
+        enableRoot.setContentDescription("启用或刷新 Root 保活");
+        enableRoot.setEnabled(false);
+        enableRoot.setOnClickListener(v -> rootCommand("root_enable"));
+        disableRoot = button("停止保活");
+        disableRoot.setContentDescription("停止 Root 保活");
+        disableRoot.setEnabled(false);
+        secondary(disableRoot);
+        disableRoot.setOnClickListener(v -> rootCommand("root_disable"));
+        hero.addView(buttonRow(enableRoot, disableRoot));
         page.addView(hero);
 
         LinearLayout stats = new LinearLayout(this);
@@ -215,14 +234,6 @@ public final class MainActivity extends Activity {
         stats.addView(timeCard, half);
         page.addView(stats, space(-1, dp(108), 0, 14));
 
-        LinearLayout health = CloudUi.card(this);
-        section(health, "运行状态");
-        serviceState = CloudUi.text(this, "正在读取状态…", 14, CloudUi.INK, false);
-        serviceState.setLineSpacing(dp(9), 1);
-        health.addView(serviceState);
-        rootSummary = CloudUi.text(this, "", 12, CloudUi.MUTED, false);
-        health.addView(rootSummary, space(-1, -2, 15, 0));
-        page.addView(health);
         LinearLayout actions = CloudUi.card(this);
         section(actions, "快捷操作");
         push = option("流体云推送", IslandPresentation.PUSH);
@@ -232,11 +243,10 @@ public final class MainActivity extends Activity {
         testIsland = button("测试上岛");
         testIsland.setEnabled(false);
         testIsland.setOnClickListener(v -> queryRuntime("test", null));
-        actions.addView(testIsland);
         Button stop = button("立即下岛");
         secondary(stop);
         stop.setOnClickListener(v -> queryRuntime("stop", null));
-        actions.addView(stop, space(-1, dp(48), 10, 0));
+        actions.addView(buttonRow(testIsland, stop));
         page.addView(actions);
         page.addView(CloudUi.text(this, "ColorOS 17 · Live Update", 11, CloudUi.MUTED, false), space(-1, -2, 4, 0));
         return scrollPage(page);
@@ -325,27 +335,16 @@ public final class MainActivity extends Activity {
         permissions.addView(usageAccess);
         page.addView(permissions);
 
-        LinearLayout rootCard = CloudUi.card(this);
-        section(rootCard, "Root 保活");
-        rootStatus = CloudUi.text(this, "正在读取已保存状态…", 13, CloudUi.MUTED, false);
-        rootStatus.setLineSpacing(dp(5), 1);
-        rootCard.addView(rootStatus, space(-1, -2, 0, 14));
-        enableRoot = button("启用 / 刷新 Root 保活");
-        enableRoot.setEnabled(false);
-        enableRoot.setOnClickListener(v -> rootCommand("root_enable"));
-        rootCard.addView(enableRoot);
-        disableRoot = button("停止 Root 保活");
-        disableRoot.setEnabled(false);
-        secondary(disableRoot);
-        disableRoot.setOnClickListener(v -> rootCommand("root_disable"));
-        rootCard.addView(disableRoot, space(-1, dp(48), 10, 0));
-        page.addView(rootCard);
-
         LinearLayout about = CloudUi.card(this);
         section(about, "关于云漾");
         about.addView(CloudUi.text(this, "云漾  " + BuildConfig.VERSION_NAME, 15, CloudUi.INK, true));
         about.addView(CloudUi.text(this, "Android 17 / ColorOS 17", 12, CloudUi.MUTED, false), space(-1, -2, 6, 14));
         about.addView(CloudUi.text(this, "作者  八角", 14, CloudUi.INK, true), space(-1, -2, 0, 10));
+        Button reward = button("赞赏作者");
+        secondary(reward);
+        reward.setContentDescription("查看作者八角的微信赞赏码");
+        reward.setOnClickListener(v -> showAuthorReward());
+        about.addView(reward, space(-1, dp(48), 0, 12));
         about.addView(profileLink("GitHub", "hendudebajiao", "https://github.com/hendudebajiao"));
         about.addView(profileLink("酷安", "八角 · 37544079", "https://www.coolapk.com/u/37544079"));
         divider(about);
@@ -356,6 +355,31 @@ public final class MainActivity extends Activity {
         about.addView(credits);
         page.addView(about);
         return scrollPage(page);
+    }
+
+    private void showAuthorReward() {
+        LinearLayout content = CloudUi.column(this);
+        content.setPadding(dp(20), dp(8), dp(20), dp(12));
+        android.widget.ImageView code = new android.widget.ImageView(this);
+        code.setImageResource(R.drawable.author_reward);
+        code.setAdjustViewBounds(true);
+        code.setScaleType(android.widget.ImageView.ScaleType.FIT_CENTER);
+        code.setContentDescription("八角的微信赞赏码");
+        content.addView(code, new LinearLayout.LayoutParams(-1, -2));
+        TextView hint = CloudUi.text(this, "感谢支持，可截图后使用微信扫一扫识别", 12, CloudUi.MUTED, false);
+        hint.setGravity(Gravity.CENTER);
+        content.addView(hint, space(-1, -2, 14, 0));
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(false);
+        scroll.addView(content);
+        android.app.AlertDialog dialog = new android.app.AlertDialog.Builder(this)
+                .setTitle("赞赏作者 · 八角")
+                .setView(scroll).setPositiveButton("关闭", null).create();
+        dialog.setOnShowListener(ignored -> {
+            dialog.getWindow().setBackgroundDrawable(CloudUi.shape(this, CloudUi.BG, 26));
+            dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setTextColor(CloudUi.BLUE);
+        });
+        dialog.show();
     }
 
     private View profileLink(String platform, String account, String url) {
@@ -457,6 +481,17 @@ public final class MainActivity extends Activity {
     private void secondary(Button button) {
         button.setTextColor(CloudUi.BLUE);
         CloudUi.pressable(button, CloudUi.PALE, 16);
+    }
+
+    private LinearLayout buttonRow(Button first, Button second) {
+        LinearLayout row = new LinearLayout(this);
+        LinearLayout.LayoutParams left = new LinearLayout.LayoutParams(0, dp(48), 1);
+        left.setMarginEnd(dp(5));
+        row.addView(first, left);
+        LinearLayout.LayoutParams right = new LinearLayout.LayoutParams(0, dp(48), 1);
+        right.setMarginStart(dp(5));
+        row.addView(second, right);
+        return row;
     }
 
     private Switch option(String label, String key) {
@@ -627,26 +662,39 @@ public final class MainActivity extends Activity {
         boolean listener = nm.isNotificationListenerAccessGranted(new ComponentName(this, IslandNotificationListener.class));
         boolean notifications = nm.areNotificationsEnabled();
         boolean live = Build.VERSION.SDK_INT >= 36 && nm.canPostPromotedNotifications();
+        boolean usage = IslandOpenedSources.allowed(this);
         access.setVisibility(listener ? View.GONE : View.VISIBLE);
         notificationPermission.setVisibility(notifications ? View.GONE : View.VISIBLE);
         promoted.setVisibility(live ? View.GONE : View.VISIBLE);
-        usageAccess.setVisibility(IslandOpenedSources.allowed(this) ? View.GONE : View.VISIBLE);
+        usageAccess.setVisibility(usage ? View.GONE : View.VISIBLE);
         boolean connected = runtimeState.getBoolean("connected");
         boolean presenting = runtimeState.getBoolean("presenting");
-        boolean root = runtimeState.getBoolean("root_enabled");
         boolean pushEnabled = runtimeState.getBoolean(IslandPresentation.PUSH, true);
-        heroTitle.setText(!pushEnabled ? "推送已暂停" : connected ? (presenting ? "消息已上岛" : "随时待命") : "等待连接");
-        heroSubtitle.setText(connected ? "通知监测已连接 · ColorOS 17" : "请在设置中检查通知访问权限");
-        serviceState.setText("消息监测     " + (connected ? "独立运行中" : "等待连接")
-                + "\n流体云         " + (!pushEnabled ? "推送已关闭" : presenting ? "正在显示通知" : "等待新消息"));
-        rootSummary.setText("Root 保活  " + (root ? "已启用" : "未启用") + "  ·  "
-                + (getSystemService(android.os.PowerManager.class).isIgnoringBatteryOptimizations(getPackageName()) ? "电池优化已豁免" : "电池优化未豁免"));
+        boolean runtimeReady = runtimeState.containsKey("root_enabled");
+        boolean rootEnabled = runtimeState.getBoolean("root_enabled");
+        List<String> missing = new ArrayList<>();
+        if (!listener) missing.add("通知访问");
+        if (!notifications) missing.add("通知权限");
+        if (!live) missing.add("Live Update");
+        if (!usage) missing.add("使用情况访问");
+        if (runtimeReady && !rootEnabled) missing.add("Root 保活");
+        boolean ready = runtimeReady && missing.isEmpty();
+        heroTitle.setVisibility(ready ? View.GONE : View.VISIBLE);
+        heroTitle.setText(missing.isEmpty() ? "正在检查权限…" : "权限缺失");
+        heroTitle.setTextColor(missing.isEmpty() ? CloudUi.INK : 0xffB76A24);
+        heroSubtitle.setVisibility(missing.isEmpty() ? View.GONE : View.VISIBLE);
+        heroSubtitle.setText(missing.isEmpty() ? "" : "缺少：" + android.text.TextUtils.join("、", missing));
+        serviceState.setVisibility(ready ? View.VISIBLE : View.GONE);
+        serviceState.setText("消息监测    " + (connected ? "运行中" : "等待连接")
+                + "\n流体云        " + (!pushEnabled ? "推送已暂停" : presenting ? "正在显示通知" : "等待消息"));
+        String savedRootStatus = runtimeState.getString("root_status", "正在读取已保存状态…");
+        rootStatus.setVisibility(rootOperationPending || !rootEnabled || savedRootStatus.contains("失败")
+                ? View.VISIBLE : View.GONE);
         if (!rootOperationPending) {
-            rootStatus.setText(runtimeState.getString("root_status", "正在读取已保存状态…")
-                    + "\n仅保护云漾的通知监测服务");
+            rootStatus.setText(savedRootStatus);
         }
         permissionSummary.setText("通知访问  " + (listener ? "已授权" : "未开启") + "  ·  通知权限  " + (notifications ? "已开启" : "未开启")
-                + "\nLive Update  " + (live ? "可用" : "未开启") + "  ·  自动下岛识别  " + (IslandOpenedSources.allowed(this) ? "已授权" : "未开启"));
+                + "\nLive Update  " + (live ? "可用" : "未开启") + "  ·  自动下岛识别  " + (usage ? "已授权" : "未开启"));
         ArrayList<String> packages = runtimeState.getStringArrayList("packages");
         selectionSummary.setText((packages == null ? 0 : packages.size()) + " 个");
         int seconds = runtimeState.getInt("seconds", IslandLifetime.DEFAULT_SECONDS);
@@ -682,6 +730,7 @@ public final class MainActivity extends Activity {
         rootOperationPending = true;
         enableRoot.setEnabled(false);
         disableRoot.setEnabled(false);
+        rootStatus.setVisibility(View.VISIBLE);
         rootStatus.setText("root_enable".equals(method) ? "正在请求授权并启动保活…" : "正在停止保活…");
         Bundle params = new Bundle();
         rootRequestId = java.util.UUID.randomUUID().toString();

@@ -85,7 +85,6 @@ final class RootKeepaliveManager {
                         + "until cmd activity get-started-user-state " + user
                         + " 2>/dev/null | grep -q RUNNING_UNLOCKED; do sleep 5; done\n"
                         + "[ -f " + ROOT_DIR + "/enabled ] || exit 0\n"
-                        + "dumpsys deviceidle whitelist +" + app.getPackageName() + " >/dev/null 2>&1\n"
                         + "sh " + ROOT_DIR + "/watchdog-v4.sh\n) >/dev/null 2>&1 &\n", StandardCharsets.UTF_8);
                 ok = runRoot(cleanupLegacy() + cleanupWatchdogs()
                         + "mkdir -p " + ROOT_DIR + "; rm -rf " + ROOT_DIR + "/lock; "
@@ -123,7 +122,8 @@ final class RootKeepaliveManager {
                     + quote(app.getPackageName() + ":monitor")
                     + " ]; then echo 250 > /proc/$p/oom_score_adj 2>/dev/null; fi;; esac; "
                     + "rm -f " + SCRIPT + " " + BOOT_SCRIPT + " " + ROOT_DIR + "/enabled "
-                    + ROOT_DIR + "/watchdog-v4.sh; rm -rf " + ROOT_DIR + "/lock; "
+                    + ROOT_DIR + "/watchdog-v2.sh " + ROOT_DIR + "/watchdog-v3.sh; "
+                    + "rm -rf " + ROOT_DIR + "/lock; rmdir " + ROOT_DIR + " 2>/dev/null; "
                     + "dumpsys deviceidle whitelist -" + app.getPackageName());
             if (ok) app.getSharedPreferences(IslandNotificationListener.PREFS, Context.MODE_PRIVATE)
                     .edit().putBoolean(KEY_ENABLED, false).apply();

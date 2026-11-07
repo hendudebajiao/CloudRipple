@@ -2,6 +2,7 @@
 # Installed by this APK after KernelSU authorization. Never protect another app.
 ROOT=/data/adb/notification_island
 SCRIPT=$ROOT/watchdog-v4.sh
+BOOT_SCRIPT=/data/adb/service.d/notification-island.sh
 PKG=@PACKAGE@
 APP_UID=@UID@
 USER_ID=@USER@
@@ -23,7 +24,12 @@ cleanup() {
   fi
   if [ "$(cat "$ROOT/lock/pid" 2>/dev/null)" = "$$" ]; then
     rm -f "$ROOT/lock/pid"
-    rmdir "$ROOT/lock"
+    rmdir "$ROOT/lock" 2>/dev/null
+    if [ "$uninstalled" = 1 ]; then
+      timeout 6 dumpsys deviceidle whitelist -"$PKG" >/dev/null 2>&1
+      rm -f "$BOOT_SCRIPT" "$ROOT/enabled" "$ROOT/watchdog-v2.sh" "$ROOT/watchdog-v3.sh" "$SCRIPT"
+      rmdir "$ROOT" 2>/dev/null
+    fi
   fi
 }
 trap cleanup EXIT
@@ -32,6 +38,12 @@ valid_pid() {
   case $1 in ''|*[!0-9]*) return 1;; esac
   [ "$(tr -d '\000' < /proc/$1/cmdline 2>/dev/null)" = "$PKG:monitor" ] || return 1
   [ "$(stat -c %u /proc/$1 2>/dev/null)" = "$APP_UID" ]
+}
+package_state() {
+  # A failed/partial PackageManager response must never trigger deletion.
+  packages=$(timeout 6 cmd package list packages -U --user "$USER_ID" 2>/dev/null) || return 2
+  printf '%s\n' "$packages" | grep -Eq '^package:android uid:[0-9]+$' || return 2
+  printf '%s\n' "$packages" | grep -Fxq "package:$PKG uid:$APP_UID"
 }
 protect() {
   p=$1
@@ -54,7 +66,34 @@ protect() {
 }
 last_recover=0
 last_rebind=0
+last_package_check=0
+missing_since=0
+package_ready=0
+uninstalled=0
 while [ -f "$ROOT/enabled" ]; do
+  now=$(date +%s)
+  if [ $((now-last_package_check)) -ge 10 ]; then
+    last_package_check=$now
+    package_state
+    state=$?
+    if [ "$state" = 0 ]; then
+      package_ready=1
+      missing_since=0
+    else
+      package_ready=0
+      if [ "$state" = 1 ]; then
+        [ "$missing_since" = 0 ] && missing_since=$now
+        # Leave time for package replacement; require repeated successful queries.
+        if [ $((now-missing_since)) -ge 30 ]; then
+          uninstalled=1
+          exit 0
+        fi
+      else
+        missing_since=0
+      fi
+    fi
+  fi
+  if [ "$package_ready" != 1 ]; then sleep 2; continue; fi
   p=$(cat "$FILES/monitor-pid" 2>/dev/null)
   if ! valid_pid "$p"; then
     p=
@@ -62,7 +101,6 @@ while [ -f "$ROOT/enabled" ]; do
       if valid_pid "$candidate"; then p=$candidate; break; fi
     done
   fi
-  now=$(date +%s)
   if valid_pid "$p"; then protect "$p"; fi
   stamp=$(stat -c %Y "$FILES/listener-heartbeat" 2>/dev/null)
   stamp=${stamp:-0}

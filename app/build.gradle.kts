@@ -10,8 +10,8 @@ android {
         applicationId = "com.bajiao.notificationisland"
         minSdk = 29
         targetSdk = 37
-        versionCode = 16
-        versionName = "1.8.2"
+        versionCode = 17
+        versionName = "1.8.3"
     }
 
     lint {
