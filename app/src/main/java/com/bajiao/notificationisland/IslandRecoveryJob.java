@@ -12,6 +12,7 @@ public final class IslandRecoveryJob extends JobService {
     private static final int ID = 17010;
 
     static boolean schedule(Context context) {
+        if (RootKeepaliveManager.isUninstalling(context)) return false;
         JobScheduler scheduler = context.getSystemService(JobScheduler.class);
         if (scheduler.getPendingJob(ID) != null) return true;
         return scheduler.schedule(new JobInfo.Builder(ID, new ComponentName(context, IslandRecoveryJob.class))
@@ -21,6 +22,7 @@ public final class IslandRecoveryJob extends JobService {
     static void cancel(Context context) { context.getSystemService(JobScheduler.class).cancel(ID); }
 
     @Override public boolean onStartJob(JobParameters params) {
+        if (RootKeepaliveManager.isUninstalling(this)) return false;
         IslandNotificationListener.refresh(this);
         if (!RootKeepaliveManager.isEnabled(this)) return false;
         RootKeepaliveManager.enable(this, success -> jobFinished(params, false));

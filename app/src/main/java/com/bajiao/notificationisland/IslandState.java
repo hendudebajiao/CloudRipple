@@ -27,7 +27,6 @@ final class IslandState {
         final String leftLabel;
         final long postedAt;
         final PendingIntent contentIntent;
-        final StatusBarNotification original;
         final boolean isSuppressed;
         final Bitmap sourceIcon;
 
@@ -57,7 +56,6 @@ final class IslandState {
             shortText = conversation.body;
             postedAt = sbn.getPostTime();
             contentIntent = n.contentIntent;
-            original = sbn;
             isSuppressed = suppressed.contains(sourceKey);
         }
 
@@ -127,11 +125,6 @@ final class IslandState {
         Conversation(String name, String body) { this.name = name; this.body = body; }
     }
 
-    static String contactLabel(String pkg, Notification n, String title, String appLabel) {
-        CharSequence text = n.extras == null ? null : n.extras.getCharSequence(Notification.EXTRA_TEXT);
-        return conversation(pkg, n, title, text == null ? "" : text.toString(), appLabel).name;
-    }
-
     static Conversation conversation(String pkg, Notification n, String title, String text, String appLabel) {
         String fallbackName = title == null || title.trim().isEmpty() ? appLabel : title.trim();
         String fallbackBody = text == null || text.trim().isEmpty() ? fallbackName : text;
@@ -181,6 +174,8 @@ final class IslandState {
         if (saved != null) suppressed.addAll(saved);
     }
 
+    // A dismissal must survive an immediate monitor restart after the notification action.
+    @android.annotation.SuppressLint("ApplySharedPref")
     private static void persistSuppressed() {
         if (appContext == null) return;
         appContext.getSharedPreferences(IslandNotificationListener.PREFS, Context.MODE_PRIVATE)
@@ -215,8 +210,7 @@ final class IslandState {
     static synchronized void remove(String key) {
         if (appContext != null) IslandLifetime.forget(appContext, key);
         stack.removeIf(item -> item.sourceKey.equals(key));
-        suppressed.remove(key);
-        persistSuppressed();
+        if (suppressed.remove(key)) persistSuppressed();
     }
 
     static synchronized void suppress(String key) {

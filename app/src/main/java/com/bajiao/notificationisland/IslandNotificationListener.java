@@ -1,7 +1,6 @@
 package com.bajiao.notificationisland;
 
 import android.content.ComponentName;
-import android.content.Intent;
 import android.content.SharedPreferences;
 import android.service.notification.NotificationListenerService;
 import android.service.notification.StatusBarNotification;
@@ -32,6 +31,7 @@ public final class IslandNotificationListener extends NotificationListenerServic
     private boolean firstSync = true;
     private boolean bound;
     private final Runnable reconnect = () -> {
+        if (RootKeepaliveManager.isUninstalling(this)) return;
         if (isConnected()) return;
         try { requestRebind(new ComponentName(this, IslandNotificationListener.class)); }
         catch (RuntimeException error) { Log.w(TAG, "Rebind failed", error); }
@@ -46,6 +46,10 @@ public final class IslandNotificationListener extends NotificationListenerServic
 
     @Override
     public void onListenerConnected() {
+        if (RootKeepaliveManager.isUninstalling(this)) {
+            requestUnbind();
+            return;
+        }
         connected = this;
         bound = true;
         firstSync = true;
@@ -96,7 +100,7 @@ public final class IslandNotificationListener extends NotificationListenerServic
         main.removeCallbacks(activeSync);
         Log.w(TAG, "notification listener disconnected");
         main.removeCallbacks(reconnect);
-        main.postDelayed(reconnect, 2000);
+        if (!RootKeepaliveManager.isUninstalling(this)) main.postDelayed(reconnect, 2000);
     }
 
     @Override public void onDestroy() {
@@ -108,7 +112,7 @@ public final class IslandNotificationListener extends NotificationListenerServic
     }
 
     private void syncActive() {
-        if (!bound) return;
+        if (!bound || RootKeepaliveManager.isUninstalling(this)) return;
         try {
             IslandState.Item before = IslandState.current();
             StatusBarNotification[] active = getActiveNotifications();
@@ -162,6 +166,7 @@ public final class IslandNotificationListener extends NotificationListenerServic
     }
 
     static void refresh(Context context) {
+        if (RootKeepaliveManager.isUninstalling(context)) return;
         IslandState.init(context);
         IslandNotificationListener listener = connected;
         if (listener != null) listener.main.post(listener::syncActive);
@@ -170,6 +175,17 @@ public final class IslandNotificationListener extends NotificationListenerServic
             try { requestRebind(new ComponentName(context, IslandNotificationListener.class)); }
             catch (RuntimeException e) { Log.w(TAG, "Listener rebind failed", e); }
             // Give the normal system rebind time to finish; do not cycle permission here.
+        }
+    }
+
+    static void pauseForUninstall() {
+        IslandNotificationListener listener = connected;
+        if (listener != null) {
+            listener.bound = false;
+            listener.main.removeCallbacks(listener.activeSync);
+            listener.main.removeCallbacks(listener.reconnect);
+            connected = null;
+            listener.requestUnbind();
         }
     }
 
@@ -186,13 +202,9 @@ public final class IslandNotificationListener extends NotificationListenerServic
     }
 
     private boolean accepts(StatusBarNotification sbn, Set<String> allowed) {
-        return sbn != null && !sbn.getPackageName().equals(getPackageName())
+        return !RootKeepaliveManager.isUninstalling(this) && sbn != null && !sbn.getPackageName().equals(getPackageName())
                 && (sbn.getNotification().flags & android.app.Notification.FLAG_GROUP_SUMMARY) == 0
                 && allowed.contains(sbn.getPackageName());
     }
 
-    static void stopIsland(android.content.Context context) {
-        context.sendBroadcast(new Intent(IslandActionReceiver.ACTION_STOP)
-                .setPackage(context.getPackageName()));
-    }
 }

@@ -17,6 +17,8 @@ final class IslandMarqueeHook {
     private static boolean marqueeEnabled;
     private static final java.lang.reflect.Method START_MARQUEE = nativeMarqueeMethod();
 
+    // Used only by the LSPosed hook in SystemUI; unavailable OEM internals fall back gracefully.
+    @android.annotation.SuppressLint("SoonBlockedPrivateApi")
     private static java.lang.reflect.Method nativeMarqueeMethod() {
         try {
             java.lang.reflect.Method method = TextView.class.getDeclaredMethod("startMarquee");
@@ -140,7 +142,7 @@ final class IslandMarqueeHook {
 
     static void afterAttached(TextView view) {
         // Text is frequently assigned before ColorOS inserts the title into right_section.
-        afterSetText(view, view.getText());
+        afterSetText(view);
         Binding binding = changed.get(view);
         if (binding != null) binding.observe(view);
     }
@@ -174,35 +176,8 @@ final class IslandMarqueeHook {
             View.OnAttachStateChangeListener {
         final WeakReference<TextView> target;
         final Original original;
-        int diagnosticSamples;
-        long lastDiagnostic;
-        void diagnose(TextView view) {
-            if (!BuildConfig.DEBUG || diagnosticSamples >= 4) return;
-            long now = android.os.SystemClock.uptimeMillis();
-            if (now - lastDiagnostic < 1200 || !view.isAttachedToWindow()) return;
-            lastDiagnostic = now;
-            diagnosticSamples++;
-            String nativeState = "unavailable";
-            try {
-                java.lang.reflect.Field field = TextView.class.getDeclaredField("mMarquee");
-                field.setAccessible(true);
-                Object marquee = field.get(view);
-                if (marquee != null) {
-                    java.lang.reflect.Method scroll = marquee.getClass().getDeclaredMethod("getScroll");
-                    scroll.setAccessible(true);
-                    java.lang.reflect.Method stopped = marquee.getClass().getDeclaredMethod("isStopped");
-                    stopped.setAccessible(true);
-                    nativeState = "scroll=" + scroll.invoke(marquee) + ",stopped=" + stopped.invoke(marquee);
-                } else nativeState = "none";
-            } catch (ReflectiveOperationException | RuntimeException ignored) {}
-            android.util.Log.i("IslandMarquee", "width=" + view.getWidth()
-                    + ",line=" + (view.getLayout() == null ? -1 : view.getLayout().getLineWidth(0))
-                    + ",selected=" + view.isSelected() + ",visible=" + view.isShown()
-                    + ",native=" + nativeState);
-        }
         private ViewTreeObserver observer;
         final Map<View, Integer> widths = new WeakHashMap<>();
-        final Map<android.widget.FrameLayout, Integer> gravities = new WeakHashMap<>();
         WeakReference<TextView> label = new WeakReference<>(null);
 
         void width(View view, int value) {
@@ -277,21 +252,12 @@ final class IslandMarqueeHook {
                 android.view.ViewGroup.LayoutParams lp = node.getLayoutParams();
                 if (lp != null && lp.width != entry.getValue()) { lp.width = entry.getValue(); node.setLayoutParams(lp); }
             }
-            for (Map.Entry<android.widget.FrameLayout, Integer> entry : gravities.entrySet()) {
-                android.widget.FrameLayout section = entry.getKey();
-                for (int i = 0; i < section.getChildCount(); i++) {
-                    View child = section.getChildAt(i);
-                    if (widths.containsKey(child) && child.getLayoutParams() instanceof android.widget.FrameLayout.LayoutParams lp) {
-                        lp.gravity = entry.getValue(); child.setLayoutParams(lp);
-                    }
-                }
-            }
             TextView name = label.get();
             if (name != null) name.setVisibility(View.GONE);
         }
     }
 
-    static void afterSetText(TextView view, CharSequence value) {
+    static void afterSetText(TextView view) {
         if (updating.get()) return;
         bindLeftLabel(view);
         refresh(view);
@@ -310,10 +276,11 @@ final class IslandMarqueeHook {
             if (!changed.containsKey(view)) changed.put(view, new Binding(view));
             if (!view.isSingleLine() || view.getMaxLines() != 1) view.setSingleLine(true);
             if (!view.isHorizontallyScrollable()) view.setHorizontallyScrolling(true);
-            int width = slotWidth(view) + view.getCompoundPaddingLeft() + view.getCompoundPaddingRight();
+            int slot = slotWidth(view);
+            int width = slot + view.getCompoundPaddingLeft() + view.getCompoundPaddingRight();
             if (view.getMinEms() >= 0 || view.getMinWidth() != width) view.setMinWidth(width);
             if (view.getMaxEms() >= 0 || view.getMaxWidth() != width) view.setMaxWidth(width);
-            boolean scrolling = marqueeEnabled && view.getPaint().measureText(full) > slotWidth(view);
+            boolean scrolling = marqueeEnabled && view.getPaint().measureText(full) > slot;
             TextUtils.TruncateAt ellipsize = scrolling ? TextUtils.TruncateAt.MARQUEE : TextUtils.TruncateAt.END;
             if (view.getEllipsize() != ellipsize) view.setEllipsize(ellipsize);
             if (scrolling && view.getMarqueeRepeatLimit() != -1) view.setMarqueeRepeatLimit(-1);
@@ -321,7 +288,6 @@ final class IslandMarqueeHook {
             Binding binding = changed.get(view);
             binding.layout(view);
             if (scrolling) resumeMarquee(view);
-            binding.diagnose(view);
         } finally {
             updating.set(false);
         }

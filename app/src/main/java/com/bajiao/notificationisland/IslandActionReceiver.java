@@ -3,12 +3,10 @@ package com.bajiao.notificationisland;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
-import android.app.PendingIntent;
 
 /** Handles actions from the promoted notification. */
 public final class IslandActionReceiver extends BroadcastReceiver {
     static final String ACTION_STOP = "com.bajiao.notificationisland.ACTION_ISLAND_STOP";
-    static final String ACTION_OPEN = "com.bajiao.notificationisland.ACTION_ISLAND_OPEN";
 
     @Override
     public void onReceive(Context context, Intent intent) {
@@ -17,13 +15,6 @@ public final class IslandActionReceiver extends BroadcastReceiver {
         String key = intent.getStringExtra(IslandForegroundService.EXTRA_SOURCE_KEY);
         if (ACTION_STOP.equals(intent.getAction())) {
             dismiss(context, key);
-        } else if (ACTION_OPEN.equals(intent.getAction()) && key != null) {
-            for (IslandState.Item item : IslandState.snapshot()) {
-                if (key.equals(item.sourceKey) && item.contentIntent != null) {
-                    try { item.contentIntent.send(); } catch (PendingIntent.CanceledException ignored) {}
-                    break;
-                }
-            }
         }
     }
 

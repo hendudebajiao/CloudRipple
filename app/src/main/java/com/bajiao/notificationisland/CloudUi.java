@@ -63,6 +63,8 @@ final class CloudUi {
     }
 
     /** Floating capsule with an animated selected pill and accessible, 56dp tab targets. */
+    // Constructed in code with a required callback; never inflated from XML.
+    @android.annotation.SuppressLint("ViewConstructor")
     static final class Navigation extends FrameLayout {
         private final View indicator;
         private final LinearLayout tabs;
@@ -168,6 +170,8 @@ final class CloudUi {
             return false;
         }
 
+        // Each child tab exposes its own click action. This parent handles drag selection only.
+        @android.annotation.SuppressLint("ClickableViewAccessibility")
         @Override public boolean onTouchEvent(MotionEvent event) {
             if (event.getActionMasked() == MotionEvent.ACTION_DOWN) return true;
             if (!dragging) return super.onTouchEvent(event);

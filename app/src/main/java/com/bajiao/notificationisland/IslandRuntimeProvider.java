@@ -23,7 +23,7 @@ public final class IslandRuntimeProvider extends ContentProvider {
     private long rootOperationStarted;
 
     @Override public boolean onCreate() {
-        RootKeepaliveManager.monitorCreated(requireContext());
+        RootKeepaliveManager.monitorCreated(context());
         return true;
     }
 
@@ -34,11 +34,24 @@ public final class IslandRuntimeProvider extends ContentProvider {
         FutureTask<Bundle> command = new FutureTask<>(() -> execute(method, extras));
         main.post(command);
         try { return command.get(10, TimeUnit.SECONDS); }
-        catch (Exception error) { throw new IllegalStateException("Runtime command failed", error); }
+        catch (InterruptedException error) {
+            command.cancel(false);
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Runtime command interrupted", error);
+        } catch (java.util.concurrent.TimeoutException error) {
+            command.cancel(false);
+            throw new IllegalStateException("Runtime command timed out", error);
+        } catch (java.util.concurrent.ExecutionException error) {
+            throw new IllegalStateException("Runtime command failed", error.getCause());
+        }
     }
 
+    private android.content.Context context() { return java.util.Objects.requireNonNull(getContext()); }
+
+    // IPC setters must reach disk before replying: callers can immediately restart the monitor.
+    @android.annotation.SuppressLint("ApplySharedPref")
     private Bundle execute(String method, Bundle extras) {
-        var context = requireContext();
+        var context = context();
         var prefs = context.getSharedPreferences(IslandNotificationListener.PREFS, 0);
         switch (method) {
             case "status": break;
@@ -49,7 +62,8 @@ public final class IslandRuntimeProvider extends ContentProvider {
             case "selection":
                 ArrayList<String> packages = extras == null ? null : extras.getStringArrayList("packages");
                 if (packages == null) throw new IllegalArgumentException("Missing selection");
-                prefs.edit().putStringSet(IslandNotificationListener.KEY_ALLOWED, new HashSet<>(packages)).commit();
+                if (!prefs.edit().putStringSet(IslandNotificationListener.KEY_ALLOWED, new HashSet<>(packages)).commit())
+                    throw new IllegalStateException("Could not save selection");
                 IslandNotificationListener.refresh(context);
                 break;
             case "duration":
@@ -64,26 +78,33 @@ public final class IslandRuntimeProvider extends ContentProvider {
                 for (String key : new String[]{IslandPresentation.PUSH, IslandPresentation.MANUAL_STOP, IslandPresentation.MARQUEE}) {
                     if (extras.containsKey(key)) edit.putBoolean(key, extras.getBoolean(key));
                 }
-                edit.commit();
+                if (!edit.commit()) throw new IllegalStateException("Could not save presentation");
                 IslandForegroundService.render(context);
                 if (extras.containsKey(IslandPresentation.PUSH) && extras.getBoolean(IslandPresentation.PUSH))
                     IslandNotificationListener.refresh(context);
                 break;
             case "test": IslandForegroundService.test(context); break;
             case "root_initialize":
+                if (RootKeepaliveManager.isUninstalling(context) && !rootOperationPending)
+                    RootKeepaliveManager.cancelUninstall(context);
                 // Serialize and persist before dispatch: repeated launches/recreation cannot
                 // request su again. Existing installations already enabled need no setup.
                 if (!prefs.getBoolean("root_setup_attempted", false)) {
                     if (!prefs.edit().putBoolean("root_setup_attempted", true).commit())
                         throw new IllegalStateException("Could not save root setup state");
                     if (!RootKeepaliveManager.isEnabled(context)) {
-                        prefs.edit().putString("root_status", "等待首次 Root 授权").commit();
+                        prefs.edit().putString("root_status", "等待首次 Root 授权").apply();
                         RootKeepaliveManager.enable(context, ok -> prefs.edit()
                                 .putString("root_status", ok ? "已授权" : "Root 未启用")
-                                .commit());
+                                .apply());
                     }
                 }
                 break;
+            case "uninstall_cancel":
+                if (rootOperationPending) throw new IllegalStateException("Cleanup still running");
+                RootKeepaliveManager.cancelUninstall(context);
+                break;
+            case "uninstall_prepare":
             case "root_enable":
             case "root_disable":
             case "restart_system_ui":
@@ -103,11 +124,14 @@ public final class IslandRuntimeProvider extends ContentProvider {
                         rootOperationStarted = 0;
                         rootOperationSuccess = ok;
                         prefs.edit().putString("root_status", ok
-                                ? ("root_enable".equals(method) ? "已授权" : "看护已停止")
-                                : "Root 操作失败，请检查 KernelSU").commit();
+                                ? ("uninstall_prepare".equals(method) ? "环境已清理，可以卸载"
+                                : "root_enable".equals(method) ? "已授权" : "看护已停止")
+                                : "uninstall_prepare".equals(method) ? "环境清理失败，请检查 KernelSU 授权后重试"
+                                : "Root 操作失败，请检查 KernelSU").apply();
                     }
                 };
-                if ("root_enable".equals(method)) RootKeepaliveManager.enable(context, done);
+                if ("uninstall_prepare".equals(method)) RootKeepaliveManager.prepareUninstall(context, done);
+                else if ("root_enable".equals(method)) RootKeepaliveManager.enable(context, done);
                 else if ("root_disable".equals(method)) RootKeepaliveManager.disable(context, done);
                 else RootKeepaliveManager.restartSystemUi(context, done);
                 break;
@@ -117,7 +141,7 @@ public final class IslandRuntimeProvider extends ContentProvider {
     }
 
     private Bundle snapshot() {
-        var context = requireContext();
+        var context = context();
         Bundle state = new Bundle();
         state.putInt("seconds", IslandLifetime.seconds(context));
         state.putBoolean(IslandPresentation.PUSH, IslandPresentation.enabled(context, IslandPresentation.PUSH));
@@ -132,6 +156,8 @@ public final class IslandRuntimeProvider extends ContentProvider {
         state.putString("source_key", current == null ? null : current.sourceKey);
         // Status deliberately carries no notification text or PendingIntent.
         state.putBoolean("root_enabled", RootKeepaliveManager.isEnabled(context));
+        state.putBoolean("uninstall_preparing", RootKeepaliveManager.isUninstalling(context));
+        state.putBoolean("uninstall_ready", RootKeepaliveManager.isUninstallReady(context));
         state.putString("root_operation_id", rootOperationId);
         state.putBoolean("root_operation_pending", rootOperationPending);
         state.putBoolean("root_operation_success", rootOperationSuccess);

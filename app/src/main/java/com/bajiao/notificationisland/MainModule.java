@@ -47,8 +47,7 @@ public final class MainModule extends XposedModule {
                         .intercept(chain -> {
                             Object result = chain.proceed();
                             try {
-                                IslandMarqueeHook.afterSetText((TextView) chain.getThisObject(),
-                                        (CharSequence) chain.getArg(0));
+                                IslandMarqueeHook.afterSetText((TextView) chain.getThisObject());
                             } catch (RuntimeException error) {
                                 log(Log.WARN, TAG, "Marquee binding skipped: " + error);
                             }
@@ -57,8 +56,7 @@ public final class MainModule extends XposedModule {
                 hook(TextView.class.getDeclaredMethod("setText", CharSequence.class))
                         .intercept(chain -> {
                             Object result = chain.proceed();
-                            try { IslandMarqueeHook.afterSetText((TextView) chain.getThisObject(),
-                                    (CharSequence) chain.getArg(0)); }
+                            try { IslandMarqueeHook.afterSetText((TextView) chain.getThisObject()); }
                             catch (RuntimeException error) { log(Log.WARN, TAG, "Marquee binding skipped: " + error); }
                             return result;
                         });

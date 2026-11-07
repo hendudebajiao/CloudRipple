@@ -24,9 +24,11 @@ adb shell su -c 'content call --user 0 --uri content://com.bajiao.notificationis
 adb shell su -c 'content call --user 0 --uri content://com.bajiao.notificationisland.runtime --method root_disable'
 ```
 
-停止操作会清理本应用看护和开机入口、移除 Doze 白名单并恢复监测进程回收分值。1.8.3 的看护每 10 秒检查所属用户的安装状态与 UID，确认应用持续缺失 30 秒后自动退出，删除自有脚本和启用标记，并移除白名单；通常卸载后约 30–40 秒完成清理。覆盖更新保留宽限期，包管理查询超时或异常时不会删除。看护已被外部终止时，需要下次启动开机脚本并解锁后才能检测；升级前部署的旧脚本应先安装新版并启用 / 刷新一次。
+停止操作会清理本应用看护和开机入口、移除 Doze 白名单并恢复监测进程回收分值。仅卸载 APK 时，Android 不保证清除 `/data/adb` 里的脚本；如果 APK 已卸载，需由机主在 Root 文件管理器中核对并移除 `notification-island.sh` 及 `/data/adb/notification_island/`。不要清理其他应用目录。
 
 ## 行为说明
+
+首页最底部的“卸载软件”先暂停通知监听与展示、取消恢复任务，使用 Root 停止自有看护，清理 `/data/adb/notification_island/`、`/data/adb/service.d/notification-island.sh`、旧版 PID 文件和本应用私有看护文件，移除 Doze 白名单，然后打开系统卸载确认页。清理失败时不会进入卸载；请检查 Root 授权后重试。取消系统卸载会恢复消息监听，Root 保活保持关闭，需要时在首页手动启用。该流程只在点击按钮后执行，不添加常驻卸载检测。应用数据和权限由系统在确认卸载后清除。
 
 - 下岛隐藏云漾的中转项，原消息通知保留。同 key 更新仍隐藏，原通知移除后才解除抑制。
 - “打开”先隐藏当前中转，再发送原通知 Intent；原 Intent 失效时给出提示。

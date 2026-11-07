@@ -17,6 +17,8 @@ import java.util.function.Consumer;
 /** All root operations belong to the APK; KernelSU grants su to this package. */
 final class RootKeepaliveManager {
     private static final String KEY_ENABLED = "root_keepalive_enabled";
+    private static final String KEY_UNINSTALLING = "uninstall_preparing";
+    private static final String KEY_UNINSTALL_READY = "uninstall_ready";
     private static final String ROOT_DIR = "/data/adb/notification_island";
     private static final String SCRIPT = ROOT_DIR + "/watchdog-v4.sh";
     private static final String BOOT_SCRIPT = "/data/adb/service.d/notification-island.sh";
@@ -26,6 +28,7 @@ final class RootKeepaliveManager {
     private static long lastRepair;
 
     static void listenerHeartbeat(Context context) {
+        if (isUninstalling(context)) return;
         try {
             new File(context.getFilesDir(), "listener-heartbeat").createNewFile();
             new File(context.getFilesDir(), "listener-heartbeat").setLastModified(System.currentTimeMillis());
@@ -34,8 +37,7 @@ final class RootKeepaliveManager {
 
     static void monitorCreated(Context context) {
         try {
-            Files.writeString(new File(context.getFilesDir(), "monitor-pid").toPath(),
-                    String.valueOf(android.os.Process.myPid()), StandardCharsets.UTF_8);
+            writeText(new File(context.getFilesDir(), "monitor-pid"), String.valueOf(android.os.Process.myPid()));
         } catch (IOException error) { Log.w("NotificationIsland", "Monitor PID write failed", error); }
     }
 
@@ -44,7 +46,7 @@ final class RootKeepaliveManager {
                 || android.os.SystemClock.elapsedRealtime() - lastRepair < 20000) return;
         lastRepair = android.os.SystemClock.elapsedRealtime();
         Context app = context.getApplicationContext();
-        EXECUTOR.execute(() -> runRoot(rebindCommand(app)));
+        EXECUTOR.execute(() -> { if (!isUninstalling(app)) runRoot(rebindCommand(app)); });
     }
 
     private static String rebindCommand(Context app) {
@@ -57,35 +59,126 @@ final class RootKeepaliveManager {
     }
 
     private static String watchdog(Context app) throws IOException {
-        try (var input = app.getAssets().open("watchdog-v4.sh")) {
-            return new String(input.readAllBytes(), StandardCharsets.UTF_8)
+        try (var input = app.getAssets().open("watchdog-v4.sh");
+             var output = new java.io.ByteArrayOutputStream()) {
+            byte[] buffer = new byte[4096];
+            for (int count; (count = input.read(buffer)) != -1; ) output.write(buffer, 0, count);
+            return output.toString(StandardCharsets.UTF_8.name())
                     .replace("@PACKAGE@", app.getPackageName())
                     .replace("@UID@", String.valueOf(android.os.Process.myUid()))
                     .replace("@USER@", String.valueOf(android.os.Process.myUid() / 100000))
                     .replace("@FILES@", quote(app.getFilesDir().getAbsolutePath()));
         }
     }
+
+    private static void writeText(File file, String value) throws IOException {
+        Files.write(file.toPath(), value.getBytes(StandardCharsets.UTF_8));
+    }
     static boolean isEnabled(Context context) {
         return context.getSharedPreferences(IslandNotificationListener.PREFS, Context.MODE_PRIVATE)
                 .getBoolean(KEY_ENABLED, false);
     }
 
+    static boolean isUninstalling(Context context) {
+        return context.getSharedPreferences(IslandNotificationListener.PREFS, Context.MODE_PRIVATE)
+                .getBoolean(KEY_UNINSTALLING, false);
+    }
+
+    static boolean isUninstallReady(Context context) {
+        return context.getSharedPreferences(IslandNotificationListener.PREFS, Context.MODE_PRIVATE)
+                .getBoolean(KEY_UNINSTALL_READY, false);
+    }
+
+    // Clear the persisted pause before allowing another process/lifecycle transition.
+    @android.annotation.SuppressLint("ApplySharedPref")
+    static void cancelUninstall(Context context) {
+        boolean paused = isUninstalling(context);
+        context.getSharedPreferences(IslandNotificationListener.PREFS, Context.MODE_PRIVATE).edit()
+                .putBoolean(KEY_UNINSTALLING, false).putBoolean(KEY_UNINSTALL_READY, false).commit();
+        monitorCreated(context);
+        IslandRecoveryJob.schedule(context);
+        IslandNotificationListener.refresh(context);
+        if (paused) {
+            Context app = context.getApplicationContext();
+            EXECUTOR.execute(() -> {
+                if (isUninstalling(app) || IslandNotificationListener.isConnected()) return;
+                runRoot(rebindCommand(app));
+                MAIN.post(() -> IslandNotificationListener.refresh(app));
+            });
+        }
+    }
+
+    /** One-shot cleanup requested by the home button; no uninstall watcher is installed. */
+    static void prepareUninstall(Context context, Consumer<Boolean> callback) {
+        Context app = context.getApplicationContext();
+        if (!app.getSharedPreferences(IslandNotificationListener.PREFS, Context.MODE_PRIVATE).edit()
+                .putBoolean(KEY_UNINSTALLING, true).putBoolean(KEY_UNINSTALL_READY, false)
+                .putBoolean(KEY_ENABLED, false).putBoolean("root_setup_attempted", true).commit()) {
+            complete(callback, false);
+            return;
+        }
+        try {
+            IslandRecoveryJob.cancel(app);
+            IslandNotificationListener.pauseForUninstall();
+            IslandForegroundService.stopTest(app);
+            app.stopService(new android.content.Intent(app, IslandForegroundService.class));
+            app.getSystemService(android.app.NotificationManager.class).cancelAll();
+        } catch (RuntimeException error) {
+            Log.w("NotificationIsland", "Could not pause services for uninstall", error);
+            cancelUninstall(app);
+            complete(callback, false);
+            return;
+        }
+        EXECUTOR.execute(() -> {
+            String pkg = app.getPackageName();
+            boolean ok = runRoot("rm -f " + ROOT_DIR + "/enabled " + BOOT_SCRIPT + " || exit 1; "
+                    + watchdogs(true, true) + cleanupLegacy()
+                    + "p=$(cat " + quote(new File(app.getFilesDir(), "monitor-pid").getAbsolutePath()) + " 2>/dev/null); "
+                    + "case $p in ''|*[!0-9]*) ;; *) if [ \"$(tr -d '\\000' < /proc/$p/cmdline 2>/dev/null)\" = "
+                    + quote(pkg + ":monitor") + " ] && [ \"$(stat -c %u /proc/$p 2>/dev/null)\" = "
+                    + android.os.Process.myUid() + " ]; then echo 250 > /proc/$p/oom_score_adj 2>/dev/null; fi;; esac; "
+                    + "rm -rf " + ROOT_DIR + " || exit 1; "
+                    + "timeout 4 dumpsys deviceidle whitelist -" + pkg + " >/dev/null 2>&1 || exit 1; "
+                    + "[ ! -e " + ROOT_DIR + " ] && [ ! -L " + ROOT_DIR + " ] && [ ! -e " + BOOT_SCRIPT
+                    + " ] && [ ! -L " + BOOT_SCRIPT + " ] && [ ! -e /data/local/tmp/notification_island.keepalive.pid ] || exit 1; "
+                    + watchdogs(false, true));
+            if (ok) {
+                for (String name : new String[]{"watchdog-v4.sh", "notification-island-boot.sh", "monitor-pid", "listener-heartbeat"}) {
+                    File file = new File(app.getFilesDir(), name);
+                    if (file.exists() && !file.delete()) ok = false;
+                }
+            }
+            boolean cleaned = ok;
+            MAIN.post(() -> {
+                boolean saved = app.getSharedPreferences(IslandNotificationListener.PREFS, Context.MODE_PRIVATE).edit()
+                        .putBoolean(KEY_ENABLED, false).putBoolean(KEY_UNINSTALL_READY, cleaned).commit();
+                if (!cleaned || !saved) cancelUninstall(app);
+                complete(callback, cleaned && saved);
+            });
+        });
+    }
+
+    // Root authorization state must survive a restart as soon as the operation completes.
+    @android.annotation.SuppressLint("ApplySharedPref")
     static void enable(Context context, Consumer<Boolean> callback) {
         Context app = context.getApplicationContext();
+        if (isUninstalling(app)) { complete(callback, false); return; }
         IslandRecoveryJob.schedule(app);
         EXECUTOR.execute(() -> {
+            if (isUninstalling(app)) { complete(callback, false); return; }
             boolean ok;
             try {
                 File script = new File(app.getFilesDir(), "watchdog-v4.sh");
-                Files.writeString(script.toPath(), watchdog(app), StandardCharsets.UTF_8);
+                writeText(script, watchdog(app));
                 File boot = new File(app.getFilesDir(), "notification-island-boot.sh");
                 int user = android.os.Process.myUid() / 100000;
-                Files.writeString(boot.toPath(), "#!/system/bin/sh\n(\n"
+                writeText(boot, "#!/system/bin/sh\n(\n"
                         + "until [ \"$(getprop sys.boot_completed)\" = 1 ]; do sleep 5; done\n"
                         + "until cmd activity get-started-user-state " + user
                         + " 2>/dev/null | grep -q RUNNING_UNLOCKED; do sleep 5; done\n"
                         + "[ -f " + ROOT_DIR + "/enabled ] || exit 0\n"
-                        + "sh " + ROOT_DIR + "/watchdog-v4.sh\n) >/dev/null 2>&1 &\n", StandardCharsets.UTF_8);
+                        + "dumpsys deviceidle whitelist +" + app.getPackageName() + " >/dev/null 2>&1\n"
+                        + "sh " + ROOT_DIR + "/watchdog-v4.sh\n) >/dev/null 2>&1 &\n");
                 ok = runRoot(cleanupLegacy() + cleanupWatchdogs()
                         + "mkdir -p " + ROOT_DIR + "; rm -rf " + ROOT_DIR + "/lock; "
                         + "cp " + quote(script.getAbsolutePath()) + " " + ROOT_DIR + "/watchdog-v4.sh && "
@@ -104,7 +197,7 @@ final class RootKeepaliveManager {
                 app.getSharedPreferences(IslandNotificationListener.PREFS, Context.MODE_PRIVATE)
                         .edit().putBoolean(KEY_ENABLED, true).commit();
                 MAIN.post(() -> {
-                    if (IslandState.current() != null) IslandForegroundService.ensureStarted(app);
+                    if (IslandState.current() != null) IslandForegroundService.render(app);
                     IslandNotificationListener.refresh(app);
                 });
             }
@@ -112,21 +205,22 @@ final class RootKeepaliveManager {
         });
     }
 
+    @android.annotation.SuppressLint("ApplySharedPref")
     static void disable(Context context, Consumer<Boolean> callback) {
         Context app = context.getApplicationContext();
         IslandRecoveryJob.cancel(app);
         EXECUTOR.execute(() -> {
-            boolean ok = runRoot(cleanupWatchdogs() + cleanupLegacy()
+            boolean ok = runRoot(watchdogs(true, true) + cleanupLegacy()
                     + "p=$(cat " + quote(new File(app.getFilesDir(), "monitor-pid").getAbsolutePath()) + " 2>/dev/null); "
                     + "case $p in ''|*[!0-9]*) ;; *) if [ \"$(tr -d '\\000' < /proc/$p/cmdline 2>/dev/null)\" = "
                     + quote(app.getPackageName() + ":monitor")
+                    + " ] && [ \"$(stat -c %u /proc/$p 2>/dev/null)\" = " + android.os.Process.myUid()
                     + " ]; then echo 250 > /proc/$p/oom_score_adj 2>/dev/null; fi;; esac; "
-                    + "rm -f " + SCRIPT + " " + BOOT_SCRIPT + " " + ROOT_DIR + "/enabled "
-                    + ROOT_DIR + "/watchdog-v2.sh " + ROOT_DIR + "/watchdog-v3.sh; "
-                    + "rm -rf " + ROOT_DIR + "/lock; rmdir " + ROOT_DIR + " 2>/dev/null; "
+                    + "rm -f " + SCRIPT + " " + BOOT_SCRIPT + " " + ROOT_DIR + "/enabled; "
+                    + "rm -rf " + ROOT_DIR + "/lock; "
                     + "dumpsys deviceidle whitelist -" + app.getPackageName());
             if (ok) app.getSharedPreferences(IslandNotificationListener.PREFS, Context.MODE_PRIVATE)
-                    .edit().putBoolean(KEY_ENABLED, false).apply();
+                    .edit().putBoolean(KEY_ENABLED, false).commit();
             complete(callback, ok);
         });
     }
@@ -145,7 +239,7 @@ final class RootKeepaliveManager {
                 || android.os.SystemClock.elapsedRealtime() - lastRetry < 1000) return;
         lastRetry = android.os.SystemClock.elapsedRealtime();
         Context app = context.getApplicationContext();
-        EXECUTOR.execute(() -> runRoot(startCommand(app)));
+        EXECUTOR.execute(() -> { if (!isUninstalling(app)) runRoot(startCommand(app)); });
     }
 
     private static String startCommand(Context app) {
@@ -161,11 +255,16 @@ final class RootKeepaliveManager {
     }
 
     private static String cleanupWatchdogs() {
+        return watchdogs(true, false);
+    }
+
+    private static String watchdogs(boolean stop, boolean includeBoot) {
         return "ps -A -o PID,ARGS | while read p exe script rest; do "
                 + "case \"$exe\" in sh|/system/bin/sh) case \"$script\" in "
-                + ROOT_DIR + "/watchdog-v[234].sh) "
+                + ROOT_DIR + "/watchdog-v[234].sh" + (includeBoot ? "|" + BOOT_SCRIPT : "") + ") "
                 + "c=$(tr '\\000' ' ' < /proc/$p/cmdline 2>/dev/null); "
-                + "case \"$c\" in \"$exe $script \") kill -9 $p 2>/dev/null || true;; esac;; esac;; esac; done; ";
+                + "case \"$c\" in \"$exe $script \") "
+                + (stop ? "kill -9 $p 2>/dev/null || true" : "exit 1") + ";; esac;; esac;; esac; done; ";
     }
     private static String cleanupLegacy() {
         return "if [ -f /data/local/tmp/notification_island.keepalive.pid ]; then "

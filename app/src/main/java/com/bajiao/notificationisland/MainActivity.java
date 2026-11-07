@@ -47,7 +47,10 @@ public final class MainActivity extends Activity {
     private Bundle restoredUi;
     private TextView heroTitle, heroSubtitle, serviceState, selectionSummary, durationSummary;
     private TextView permissionSummary, rootStatus;
-    private Button enableRoot, disableRoot;
+    private Button enableRoot, disableRoot, uninstall;
+    private TextView uninstallStatus;
+    private boolean uninstallRequested, awaitingUninstallResult, uninstallResultReceived;
+    private static final int REQUEST_UNINSTALL = 183;
     private boolean rootOperationPending;
     private String rootRequestId;
     private final Runnable rootTimeout = () -> {
@@ -55,6 +58,11 @@ public final class MainActivity extends Activity {
         rootOperationPending = false;
         enableRoot.setEnabled(true);
         disableRoot.setEnabled(true);
+        uninstall.setEnabled(true);
+        if (uninstallRequested) {
+            uninstallRequested = false;
+            uninstallStatus.setText("清理结果尚未确认，请重试；暂未进入卸载");
+        }
         rootStatus.setText("操作结果尚未返回，正在读取已保存状态…");
         queryRuntime("status", null);
     };
@@ -82,6 +90,10 @@ public final class MainActivity extends Activity {
         out.putInt("page", currentPage);
         if (appsLoaded) out.putStringArrayList("draft_selection", new ArrayList<>(selected));
         out.putString("query", search.getText().toString());
+        out.putBoolean("uninstall_requested", uninstallRequested);
+        out.putBoolean("awaiting_uninstall_result", awaitingUninstallResult);
+        out.putBoolean("uninstall_result_received", uninstallResultReceived);
+        out.putString("uninstall_request_id", uninstallRequested ? rootRequestId : null);
         super.onSaveInstanceState(out);
     }
 
@@ -89,16 +101,30 @@ public final class MainActivity extends Activity {
         super.onCreate(state);
         restoredUi = state;
         if (state != null) currentPage = state.getInt("page", 0);
+        if (state != null) {
+            uninstallRequested = state.getBoolean("uninstall_requested");
+            awaitingUninstallResult = state.getBoolean("awaiting_uninstall_result");
+            uninstallResultReceived = state.getBoolean("uninstall_result_received");
+            rootRequestId = state.getString("uninstall_request_id");
+            rootOperationPending = uninstallRequested;
+        }
         buildUi();
         if (state != null) search.setText(state.getString("query", ""));
         // The monitor owns a persistent one-shot setup guard, including activity recreation.
-        queryRuntime("root_initialize", null);
+        if (!uninstallRequested && !awaitingUninstallResult) queryRuntime("root_initialize", null);
+        if (uninstallRequested) main.postDelayed(rootTimeout, 45000);
     }
 
     @Override protected void onResume() {
         super.onResume();
+        if (awaitingUninstallResult && uninstallResultReceived) {
+            awaitingUninstallResult = false;
+            uninstallResultReceived = false;
+            queryRuntime("uninstall_cancel", null);
+            uninstallStatus.setText("已取消卸载；消息监测恢复，Root 保活保持关闭");
+        }
         refreshPermissions();
-        queryRuntime("refresh", null);
+        queryRuntime(uninstallRequested || awaitingUninstallResult ? "status" : "refresh", null);
         main.post(pollRuntime);
     }
 
@@ -114,10 +140,12 @@ public final class MainActivity extends Activity {
     }
 
     private void buildUi() {
-        getWindow().setDecorFitsSystemWindows(false);
+        if (Build.VERSION.SDK_INT >= 30) getWindow().setDecorFitsSystemWindows(false);
         getWindow().setNavigationBarContrastEnforced(false);
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
-                | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+                | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+                | (Build.VERSION.SDK_INT < 30 ? View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION : 0));
         android.widget.FrameLayout root = new android.widget.FrameLayout(this);
         root.setBackgroundColor(CloudUi.BG);
         pageHost = new android.widget.FrameLayout(this);
@@ -131,11 +159,22 @@ public final class MainActivity extends Activity {
         navLp.bottomMargin = dp(24);
         root.addView(navigation, navLp);
         root.setOnApplyWindowInsetsListener((v, insets) -> {
-            android.graphics.Insets bars = insets.getInsets(android.view.WindowInsets.Type.systemBars()
-                    | android.view.WindowInsets.Type.displayCutout());
-            android.graphics.Insets ime = insets.getInsets(android.view.WindowInsets.Type.ime());
+            android.graphics.Insets bars;
+            int bottom;
+            if (Build.VERSION.SDK_INT >= 30) {
+                bars = insets.getInsets(android.view.WindowInsets.Type.systemBars()
+                        | android.view.WindowInsets.Type.displayCutout());
+                bottom = Math.max(bars.bottom, insets.getInsets(android.view.WindowInsets.Type.ime()).bottom);
+            } else {
+                android.view.DisplayCutout cutout = insets.getDisplayCutout();
+                bars = android.graphics.Insets.of(
+                        Math.max(insets.getSystemWindowInsetLeft(), cutout == null ? 0 : cutout.getSafeInsetLeft()),
+                        Math.max(insets.getSystemWindowInsetTop(), cutout == null ? 0 : cutout.getSafeInsetTop()),
+                        Math.max(insets.getSystemWindowInsetRight(), cutout == null ? 0 : cutout.getSafeInsetRight()),
+                        Math.max(insets.getSystemWindowInsetBottom(), cutout == null ? 0 : cutout.getSafeInsetBottom()));
+                bottom = bars.bottom;
+            }
             pageHost.setPadding(bars.left, bars.top, bars.right, 0);
-            int bottom = Math.max(bars.bottom, ime.bottom);
             for (View scroll : insetScrolls) scroll.setPadding(scroll.getPaddingLeft(), scroll.getPaddingTop(),
                     scroll.getPaddingRight(), dp(110) + bottom);
             android.widget.FrameLayout.LayoutParams lp = (android.widget.FrameLayout.LayoutParams) navigation.getLayoutParams();
@@ -249,6 +288,17 @@ public final class MainActivity extends Activity {
         actions.addView(buttonRow(testIsland, stop));
         page.addView(actions);
         page.addView(CloudUi.text(this, "ColorOS 17 · Live Update", 11, CloudUi.MUTED, false), space(-1, -2, 4, 0));
+        LinearLayout uninstallCard = CloudUi.card(this);
+        uninstallStatus = CloudUi.text(this, "先停止服务并清理云漾环境，再由系统确认卸载", 12, CloudUi.MUTED, false);
+        uninstallStatus.setLineSpacing(dp(4), 1);
+        uninstallCard.addView(uninstallStatus, space(-1, -2, 0, 12));
+        uninstall = button("卸载软件");
+        secondary(uninstall);
+        uninstall.setTextColor(0xffBC4545);
+        uninstall.setEnabled(false);
+        uninstall.setOnClickListener(v -> rootCommand("uninstall_prepare"));
+        uninstallCard.addView(uninstall);
+        page.addView(uninstallCard, space(-1, -2, 16, 0));
         return scrollPage(page);
     }
 
@@ -727,11 +777,15 @@ public final class MainActivity extends Activity {
 
     private void rootCommand(String method) {
         if (rootOperationPending) return;
+        uninstallRequested = "uninstall_prepare".equals(method);
         rootOperationPending = true;
         enableRoot.setEnabled(false);
         disableRoot.setEnabled(false);
+        uninstall.setEnabled(false);
         rootStatus.setVisibility(View.VISIBLE);
-        rootStatus.setText("root_enable".equals(method) ? "正在请求授权并启动保活…" : "正在停止保活…");
+        rootStatus.setText(uninstallRequested ? "正在停止服务并清理环境…"
+                : "root_enable".equals(method) ? "正在请求授权并启动保活…" : "正在停止保活…");
+        if (uninstallRequested) uninstallStatus.setText("正在清理，请稍候…");
         Bundle params = new Bundle();
         rootRequestId = java.util.UUID.randomUUID().toString();
         String requestId = rootRequestId;
@@ -748,6 +802,11 @@ public final class MainActivity extends Activity {
                 main.removeCallbacks(rootTimeout);
                 enableRoot.setEnabled(true);
                 disableRoot.setEnabled(true);
+                uninstall.setEnabled(true);
+                if (uninstallRequested) {
+                    uninstallRequested = false;
+                    uninstallStatus.setText("无法确认清理结果，请重试；暂未进入卸载");
+                }
                 rootStatus.setText("暂时无法连接监测服务，已保存的 Root 状态未更改");
                 main.postDelayed(() -> { if (!isDestroyed()) queryRuntime("status", null); }, 1000);
             }
@@ -760,32 +819,66 @@ public final class MainActivity extends Activity {
         IslandRuntime.submit(this, method, params, this::acceptState);
     }
 
+    @SuppressWarnings("deprecation")
+    private void openSystemUninstaller() {
+        awaitingUninstallResult = true;
+        uninstallResultReceived = false;
+        uninstall.setEnabled(false);
+        uninstallStatus.setText("环境已清理，请在系统页面确认卸载");
+        try {
+            startActivityForResult(new Intent(Intent.ACTION_UNINSTALL_PACKAGE,
+                    Uri.parse("package:" + getPackageName()))
+                    .putExtra(Intent.EXTRA_RETURN_RESULT, true), REQUEST_UNINSTALL);
+        } catch (RuntimeException error) {
+            awaitingUninstallResult = false;
+            queryRuntime("uninstall_cancel", null);
+            uninstallStatus.setText("环境已清理，但无法打开系统卸载页面，请重试");
+        }
+    }
+
+    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQUEST_UNINSTALL) return;
+        // Some vendor installers return through a trampoline before their final page closes.
+        // Resume monitoring only once this Activity itself returns to the foreground.
+        uninstallResultReceived = true;
+    }
+
     private void acceptState(Bundle state) {
         if (isDestroyed()) return;
         if (state.containsKey("error")) {
             android.widget.Toast.makeText(this, state.getString("error"), android.widget.Toast.LENGTH_SHORT).show();
             return;
         }
+        boolean openUninstaller = false;
         if (rootOperationPending && rootRequestId != null
                 && rootRequestId.equals(state.getString("root_operation_id"))
                 && !state.getBoolean("root_operation_pending")) {
             rootOperationPending = false;
             main.removeCallbacks(rootTimeout);
+            if (uninstallRequested) {
+                uninstallRequested = false;
+                openUninstaller = state.getBoolean("root_operation_success") && state.getBoolean("uninstall_ready");
+                if (!openUninstaller) uninstallStatus.setText("清理失败，请检查 Root 授权后重试；暂未进入卸载");
+            }
         }
         runtimeState = state;
-        enableRoot.setEnabled(!rootOperationPending);
-        disableRoot.setEnabled(!rootOperationPending);
+        boolean busy = rootOperationPending || state.getBoolean("root_operation_pending") || awaitingUninstallResult;
+        enableRoot.setEnabled(!busy && !state.getBoolean("uninstall_preparing"));
+        disableRoot.setEnabled(!busy && !state.getBoolean("uninstall_preparing"));
+        uninstall.setEnabled(!busy);
         if (duration != null) duration.setText(durationLabel());
         bindingOptions = true;
         push.setChecked(state.getBoolean(IslandPresentation.PUSH, true));
-        push.setEnabled(true);
-        testIsland.setEnabled(state.getBoolean(IslandPresentation.PUSH, true));
+        push.setEnabled(!busy && !state.getBoolean("uninstall_preparing"));
+        testIsland.setEnabled(!busy && state.getBoolean(IslandPresentation.PUSH, true));
         manualStop.setChecked(state.getBoolean(IslandPresentation.MANUAL_STOP, true));
         marquee.setChecked(state.getBoolean(IslandPresentation.MARQUEE, true));
         manualStop.setEnabled(true);
         marquee.setEnabled(true);
         bindingOptions = false;
         refreshPermissions();
+        if (openUninstaller) openSystemUninstaller();
     }
 
 }

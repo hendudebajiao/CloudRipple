@@ -8,7 +8,7 @@ public final class IslandTestSourceProvider extends android.content.ContentProvi
         android.content.Intent intent = new android.content.Intent().putExtra("id", Integer.parseInt(arg));
         intent.putExtra("text", "连续转发验证 " + arg);
         intent.putExtra("remove", "remove".equals(method));
-        new IslandTestSource().onReceive(requireContext(), intent);
+        new IslandTestSource().onReceive(java.util.Objects.requireNonNull(getContext()), intent);
         return new android.os.Bundle();
     }
     @Override public android.database.Cursor query(android.net.Uri u, String[] p, String s, String[] a, String o) { return null; }

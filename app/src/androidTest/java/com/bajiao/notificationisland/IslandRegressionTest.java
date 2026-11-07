@@ -4,7 +4,6 @@ import android.app.Activity;
 import android.app.Instrumentation;
 import android.app.Notification;
 import android.os.Bundle;
-import android.os.Parcel;
 import android.os.Process;
 import android.service.notification.StatusBarNotification;
 import android.text.Spanned;
@@ -146,27 +145,19 @@ public final class IslandRegressionTest extends Instrumentation {
                             IslandMarquee.shortText("😀😀😀😀😀😀😀😀").length()) == 7, "Emoji safe truncation");
                     Notification original = new Notification.Builder(getTargetContext(), "test")
                             .setSmallIcon(android.R.drawable.ic_dialog_info)
-                            .setContentText(IslandMarquee.mark("超过四字应该平滑滚动"))
+                            .setContentText("超过四字应该平滑滚动")
                             .build();
-                    Parcel parcel = Parcel.obtain();
-                    Notification restored;
-                    try {
-                        original.writeToParcel(parcel, 0);
-                        parcel.setDataPosition(0);
-                        restored = Notification.CREATOR.createFromParcel(parcel);
-                    } finally { parcel.recycle(); }
-                    CharSequence text = restored.extras.getCharSequence(Notification.EXTRA_TEXT);
-                    require(text instanceof Spanned, "Marquee annotation survives notification parceling");
+                    CharSequence text = original.extras.getCharSequence(Notification.EXTRA_TEXT);
                     TextView view = new TextView(getContext());
                     view.setText(text);
-                    IslandMarqueeHook.afterSetText(view, text);
+                    IslandMarqueeHook.afterSetText(view);
                     require(view.getEllipsize() != TextUtils.TruncateAt.MARQUEE, "Expanded text stays normal");
                     android.widget.FrameLayout right = new android.widget.FrameLayout(getContext());
                     right.setId(getContext().getResources().getIdentifier("right_section", "id", getContext().getPackageName()));
                     right.addView(view);
                     IslandMarqueeHook.rememberCompact(text.toString(), true, "联系人", "超过四字", null);
                     view.setText(text);
-                    IslandMarqueeHook.afterSetText(view, text);
+                    IslandMarqueeHook.afterSetText(view);
                     require(view.getEllipsize() == TextUtils.TruncateAt.MARQUEE && view.isSelected(), "Right section marquee enabled");
                     android.text.Layout stable = view.getLayout();
                     final int[] textChanges = {0};
@@ -186,13 +177,13 @@ public final class IslandRegressionTest extends Instrumentation {
                             && view.getMaxLines() == 1, "System template property reset repaired before draw");
                     IslandMarqueeHook.rememberCompact(text.toString(), false, "联系人", "超过四字", null);
                     view.setText(text);
-                    IslandMarqueeHook.afterSetText(view, text);
+                    IslandMarqueeHook.afterSetText(view);
                     require(view.getEllipsize() != TextUtils.TruncateAt.MARQUEE, "Right section marquee disabled");
                     view.setText("普通通知");
-                    IslandMarqueeHook.afterSetText(view, "普通通知");
+                    IslandMarqueeHook.afterSetText(view);
                     require(view.getEllipsize() != TextUtils.TruncateAt.MARQUEE && !view.isSelected(), "Reused view restored");
                     view.setText("四个汉字");
-                    IslandMarqueeHook.afterSetText(view, IslandMarquee.mark("四个汉字"));
+                    IslandMarqueeHook.afterSetText(view);
                     require(view.getEllipsize() != TextUtils.TruncateAt.MARQUEE, "Four characters stay static");
                     IslandMarqueeHook.rememberCompact("iiiiiiii", true, "联系人", "iiiiiii", null);
                     view.setText("iiiiiiii");
@@ -203,13 +194,13 @@ public final class IslandRegressionTest extends Instrumentation {
                     IslandMarqueeHook.afterAttached(view);
                     require(view.getEllipsize() != TextUtils.TruncateAt.MARQUEE && !view.isSelected(), "Disabled reattach restores view");
                     IslandMarqueeHook.rememberCompact("iiiiiiii", true, "联系人", "iiiiiii", null);
-                    IslandMarqueeHook.afterSetText(view, view.getText());
+                    IslandMarqueeHook.afterSetText(view);
                     view.setText("其他软件的通知");
                     IslandMarqueeHook.afterAttached(view);
                     require(view.getEllipsize() != TextUtils.TruncateAt.MARQUEE && !view.isSelected(), "Recycled view reattach revalidates source");
                     IslandMarqueeHook.rememberCompact("四个汉字", true, "联系人", "四个汉字", null);
                     view.setText("四个汉字");
-                    IslandMarqueeHook.afterSetText(view, view.getText());
+                    IslandMarqueeHook.afterSetText(view);
                     require(view.getEllipsize() != TextUtils.TruncateAt.MARQUEE, "Enabled four-character message stays static");
                     require(view.getMinWidth() == fixedWidth && view.getMaxWidth() == fixedWidth, "Short message keeps identical slot width");
                     Notification legacy = new Notification.Builder(getTargetContext(), "test")
@@ -233,10 +224,10 @@ public final class IslandRegressionTest extends Instrumentation {
                             .build();
                     split = IslandState.conversation("com.tencent.mobileqq", chat, "群聊", "小明：摘要", "QQ");
                     require(split.name.equals("小明") && split.body.equals("正文"), "MessagingStyle latest message has priority");
-                    require("小明".equals(IslandState.contactLabel("com.tencent.mobileqq", chat, "群聊", "QQ")), "QQ uses sender");
-                    require("小明".equals(IslandState.contactLabel("com.tencent.mm", chat, "群聊", "微信")), "WeChat uses sender");
-                    require("下载工具".equals(IslandState.contactLabel("test.download", chat, "下载完成", "下载工具")), "Other apps use app label");
-                    require("联系人".equals(IslandState.contactLabel("com.tencent.mm", original, "联系人", "微信")), "Legacy title fallback");
+                    require("小明".equals(IslandState.conversation("com.tencent.mobileqq", chat, "群聊", "", "QQ").name), "QQ uses sender");
+                    require("小明".equals(IslandState.conversation("com.tencent.mm", chat, "群聊", "", "微信").name), "WeChat uses sender");
+                    require("下载工具".equals(IslandState.conversation("test.download", chat, "下载完成", "", "下载工具").name), "Other apps use app label");
+                    require("联系人".equals(IslandState.conversation("com.tencent.mm", original, "联系人", text.toString(), "微信").name), "Legacy title fallback");
                     android.graphics.Bitmap avatar = android.graphics.Bitmap.createBitmap(24, 24, android.graphics.Bitmap.Config.ARGB_8888);
                     avatar.eraseColor(android.graphics.Color.MAGENTA);
                     Notification withAvatar = new Notification.Builder(getTargetContext(), "test")

@@ -21,7 +21,8 @@ final class IslandLifetime {
     static synchronized long deadline(Context context, String key, long now) {
         SharedPreferences p = prefs(context);
         if (p.contains(PREFIX + key)) return p.getLong(PREFIX + key, 0);
-        long deadline = seconds(context) == 0 ? 0 : now + seconds(context) * 1000L;
+        int seconds = seconds(context);
+        long deadline = seconds == 0 ? 0 : now + seconds * 1000L;
         p.edit().putLong(PREFIX + key, deadline).apply();
         return deadline;
     }
@@ -32,22 +33,27 @@ final class IslandLifetime {
 
     static synchronized void prune(Context context, java.util.Set<String> activeKeys) {
         SharedPreferences p = prefs(context);
-        SharedPreferences.Editor edit = p.edit();
+        SharedPreferences.Editor edit = null;
         for (String name : p.getAll().keySet()) {
             if (name.startsWith(PREFIX)) {
                 String key = name.substring(PREFIX.length());
-                if (!TEST_KEY.equals(key) && !activeKeys.contains(key)) edit.remove(name);
+                if (!TEST_KEY.equals(key) && !activeKeys.contains(key)) {
+                    if (edit == null) edit = p.edit();
+                    edit.remove(name);
+                }
             }
         }
-        edit.apply();
+        if (edit != null) edit.apply();
     }
 
+    // The runtime must acknowledge the new duration only after it is durable.
+    @android.annotation.SuppressLint("ApplySharedPref")
     static synchronized void setSeconds(Context context, int seconds) {
         if (seconds < 0 || seconds > 86400) throw new IllegalArgumentException("Invalid duration");
         SharedPreferences p = prefs(context);
         SharedPreferences.Editor edit = p.edit().putInt(KEY_SECONDS, seconds);
         // Explicit changes apply to currently visible/queued notifications too.
         for (String key : p.getAll().keySet()) if (key.startsWith(PREFIX)) edit.remove(key);
-        edit.commit();
+        if (!edit.commit()) throw new IllegalStateException("Could not save duration");
     }
 }

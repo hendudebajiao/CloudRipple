@@ -3,6 +3,7 @@ package com.bajiao.notificationisland;
 import android.app.Activity;
 import android.app.PendingIntent;
 import android.os.Bundle;
+import android.os.Build;
 import android.widget.Toast;
 
 /** Activity PendingIntent avoids Android's broadcast/service notification trampoline restriction. */
@@ -16,7 +17,9 @@ public final class IslandOpenActivity extends Activity {
         if (key != null) IslandState.suppress(key);
         IslandForegroundService.stopTest(this);
         IslandForegroundService.render(this);
-        PendingIntent original = getIntent().getParcelableExtra(EXTRA_ORIGINAL, PendingIntent.class);
+        PendingIntent original = Build.VERSION.SDK_INT >= 33
+                ? getIntent().getParcelableExtra(EXTRA_ORIGINAL, PendingIntent.class)
+                : getIntent().getParcelableExtra(EXTRA_ORIGINAL);
         try {
             if (original != null) original.send();
         } catch (PendingIntent.CanceledException error) {

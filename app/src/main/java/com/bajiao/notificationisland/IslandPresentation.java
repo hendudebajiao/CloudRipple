@@ -9,10 +9,7 @@ final class IslandPresentation {
     static final String MARQUEE = "marquee_enabled";
 
     static boolean enabled(Context context, String key) {
+        if (PUSH.equals(key) && RootKeepaliveManager.isUninstalling(context)) return false;
         return context.getSharedPreferences(IslandNotificationListener.PREFS, 0).getBoolean(key, true);
-    }
-
-    static CharSequence text(Context context, String value) {
-        return enabled(context, MARQUEE) ? IslandMarquee.mark(value) : value;
     }
 }

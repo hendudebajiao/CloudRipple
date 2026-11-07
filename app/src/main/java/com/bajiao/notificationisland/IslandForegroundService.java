@@ -30,7 +30,6 @@ public final class IslandForegroundService extends Service {
     private static volatile IslandForegroundService running;
     private static boolean starting;
     private final Handler main = new Handler(Looper.getMainLooper());
-    private boolean live;
     private final Runnable expire = this::renderCurrent;
 
     @Override
@@ -45,6 +44,7 @@ public final class IslandForegroundService extends Service {
     }
 
     @Override
+    @android.annotation.SuppressLint("ApplySharedPref")
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (!IslandPresentation.enabled(this, IslandPresentation.PUSH)) {
             // A start already in Android's queue must still satisfy the FGS deadline.
@@ -60,7 +60,6 @@ public final class IslandForegroundService extends Service {
         }
         if (IslandState.current() == null && !testActive(this)) {
             postForeground(buildPlaceholder());
-            live = false;
             // A restarted process first needs its listener snapshot. Meet the FGS
             // deadline, then remove this transient record if no source exists.
             main.postDelayed(this::renderCurrent, 4000L);
@@ -83,7 +82,7 @@ public final class IslandForegroundService extends Service {
     @Override
     public IBinder onBind(Intent intent) { return null; }
 
-    static void ensureStarted(Context context) {
+    static void render(Context context) {
         if (!IslandPresentation.enabled(context, IslandPresentation.PUSH)) {
             stopTest(context);
             IslandForegroundService service = running;
@@ -119,10 +118,6 @@ public final class IslandForegroundService extends Service {
         }
     }
 
-    static void render(Context context) {
-        ensureStarted(context);
-    }
-
     private void requestRender() {
         main.removeCallbacks(expire);
         if (Looper.myLooper() == Looper.getMainLooper()) renderCurrent();
@@ -146,16 +141,13 @@ public final class IslandForegroundService extends Service {
                 .getBoolean(KEY_TEST, false);
     }
 
+    // Persist before rendering/stopping so process recovery cannot resurrect a dismissed test.
+    @android.annotation.SuppressLint("ApplySharedPref")
     static void stopTest(Context context) {
         if (!testActive(context)) return;
         context.getSharedPreferences(IslandNotificationListener.PREFS, MODE_PRIVATE)
                 .edit().putBoolean(KEY_TEST, false).commit();
         IslandLifetime.forget(context, IslandLifetime.TEST_KEY);
-    }
-
-    @Override public void onTaskRemoved(Intent rootIntent) {
-        // Removing the settings task must not stop the relay service.
-        super.onTaskRemoved(rootIntent);
     }
 
     private void renderCurrent() { renderCurrent(false); }
@@ -172,7 +164,6 @@ public final class IslandForegroundService extends Service {
         if (testActive(this)) {
             if (scheduleExpiry(IslandLifetime.TEST_KEY)) {
                 postForeground(buildTest());
-                live = true;
                 return;
             }
             stopTest(this);
@@ -190,7 +181,6 @@ public final class IslandForegroundService extends Service {
             postForeground(buildLive(item));
             IslandRelayMetrics.published(item.sourceKey);
         }
-        live = nextLive;
         Log.i("NotificationIsland", nextLive ? "Live notification updated" : "Idle notification removed");
     }
 
@@ -204,7 +194,6 @@ public final class IslandForegroundService extends Service {
     }
 
     private void stopWhenIdle() {
-        live = false;
         stopForeground(STOP_FOREGROUND_REMOVE);
         stopSelf();
     }

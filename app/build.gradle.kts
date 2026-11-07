@@ -16,6 +16,7 @@ android {
 
     lint {
         targetSdk = 37
+        checkReleaseBuilds = true
     }
 
     buildFeatures { buildConfig = true }
@@ -25,6 +26,7 @@ android {
         release {
             versionNameSuffix = "-release"
             isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
@@ -35,10 +37,6 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
-    }
-
-    lint {
-        checkReleaseBuilds = false
     }
 
     dependenciesInfo {
