@@ -5,6 +5,8 @@
 
 面向 **Android 17 / ColorOS 17** 的通知流体云工具与 LSPosed 模块。作者：[八角](https://github.com/hendudebajiao) · [酷安](https://www.coolapk.com/u/37544079)。当前版本 **1.8.3（17）**。
 
+本项目已停止维护更名为《屿》
+
 勾选来源应用后，云漾通过通知监听读取消息，再以自身身份发布 Live Update，由 ColorOS 原生流体云呈现。配置界面、通知监测和通知展示分工独立；Root 保活直接通过 APK 请求 KernelSU 授权，无须另刷辅助 ZIP。
 
 本模块使用ChatGPT6.1Sol完成，AI使用提示，介意勿用
